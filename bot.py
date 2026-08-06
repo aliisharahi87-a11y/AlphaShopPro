@@ -1471,12 +1471,12 @@ def run_bot():
 
     print("🌹 AlphaShop Pro Bot Running...")
 
-    try:
-        asyncio.get_event_loop()
-    except RuntimeError:
-        asyncio.set_event_loop(asyncio.new_event_loop())
 
-    app.run_polling(drop_pending_updates=True)
+    app.run_polling(
+        drop_pending_updates=True,
+        close_loop=False,
+        stop_signals=None,
+    )
 
 
 if __name__ == "__main__":
