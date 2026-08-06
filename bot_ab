@@ -1,0 +1,300 @@
+            "welcome",
+            name=user.first_name or "دوست عزیز",
+        ),
+        reply_markup=menu(user.id),
+    )
+
+    await update.message.reply_text(
+        tr(user.id, "welcome", name=user.first_name or "دوست عزیز"),
+        reply_markup=menu(user.id),
+    )
+
+
+async def check_membership(update, context):
+    query = update.callback_query
+    await query.answer()
+
+    if await is_member(context.bot, query.from_user.id):
+        await query.message.edit_text(tr(query.from_user.id, "joined"))
+        await query.message.reply_text(
+            tr(query.from_user.id, "welcome", name=query.from_user.first_name or ""),
+            reply_markup=menu(query.from_user.id),
+        )
+    else:
+        await query.answer(
+            tr(query.from_user.id, "need"),
+            show_alert=True,
+        )
+
+
+async def settings(update, context):
+    if not await gate(update, context):
+        return
+    uid = update.effective_user.id
+    l = lang(uid)
+    other = "English" if l == "fa" else "فارسی"
+    keyboard = InlineKeyboardMarkup(
+        [
+            [InlineKeyboardButton(f"🌐 {other}", callback_data="toggle_lang")],
+            [InlineKeyboardButton(tr(uid, "back"), callback_data="back_menu")],
+        ]
+    )
+    await update.message.reply_text(tr(uid, "settings_text"), reply_markup=keyboard)
+
+
+async def toggle_language(update, context):
+    query = update.callback_query
+    uid = query.from_user.id
+    new_lang = "en" if lang(uid) == "fa" else "fa"
+    db.set_lang(uid, new_lang)
+    await query.answer()
+    await query.message.edit_text(TEXT[new_lang]["language_changed"])
+    await query.message.reply_text(
+        TEXT[new_lang]["welcome"].format(name=query.from_user.first_name or ""),
+        reply_markup=menu(uid),
+    )
+
+
+async def back_menu(update, context):
+    query = update.callback_query
+    await query.answer()
+    await query.message.delete()
+    await query.message.chat.send_message(
+        tr(query.from_user.id, "welcome", name=query.from_user.first_name or ""),
+        reply_markup=menu(query.from_user.id),
+    )
+
+
+async def wallet(update, context):
+    if not await gate(update, context):
+        return
+    uid = update.effective_user.id
+    keyboard = InlineKeyboardMarkup(
+        [
+            [InlineKeyboardButton(tr(uid, "deposit"), callback_data="deposit")],
+            [InlineKeyboardButton(tr(uid, "coupon"), callback_data="coupon")],
+        ]
+    )
+    u = db.get_user(uid)
+    await update.message.reply_text(
+        tr(uid, "balance", amount=u["balance"]),
+        reply_markup=keyboard,
+    )
+
+
+async def deposit_start(update, context):
+    query = update.callback_query
+    await query.answer()
+    await query.message.reply_text(tr(query.from_user.id, "deposit_amount"))
+    return DEP_AMOUNT
+
+
+async def deposit_amount(update, context):
+    uid = update.effective_user.id
+    try:
+        amount = int(update.message.text.replace(",", "").replace("٬", "").strip())
+    except ValueError:
+        await update.message.reply_text(tr(uid, "invalid_amount"))
+        return DEP_AMOUNT
+
+    if amount < 1000:
+        await update.message.reply_text(tr(uid, "min_deposit"))
+        return DEP_AMOUNT
+
+    context.user_data["deposit_amount"] = amount
+    await update.message.reply_text(
+        tr(
+            uid,
+            "payment_info",
+            card=CARD_NUMBER or "Not configured",
+            holder=CARD_HOLDER or "Not configured",
+            amount=amount,
+        )
+    )
+    return DEP_RECEIPT
+
+
+async def deposit_receipt(update, context):
+    uid = update.effective_user.id
+    if not update.message.photo:
+        await update.message.reply_text(tr(uid, "receipt_only"))
+        return DEP_RECEIPT
+
+    amount = context.user_data.get("deposit_amount")
+    if not amount:
+        await update.message.reply_text(tr(uid, "invalid_amount"))
+        return ConversationHandler.END
+
+    receipt = update.message.photo[-1].file_id
+    rid = db.add_deposit(uid, amount, receipt)
+    context.user_data.clear()
+
+    await update.message.reply_text(
+        tr(uid, "receipt_saved", rid=rid),
+        reply_markup=menu(uid),
+    )
+
+    buttons = InlineKeyboardMarkup(
+        [[
+            InlineKeyboardButton("✅ تأیید / Approve", callback_data=f"dep:1:{rid}"),
+            InlineKeyboardButton("❌ رد / Reject", callback_data=f"dep:0:{rid}"),
+        ]]
+    )
+
+    caption = (
+        f"💳 Deposit #{rid}\n"
+        f"👤 {update.effective_user.full_name}\n"
+        f"🆔 {uid}\n"
+        f"💰 {amount:,} Toman"
+    )
+
+    for admin_id in ADMIN_IDS:
+        try:
+            await context.bot.send_photo(
+                admin_id,
+                receipt,
+                caption=caption,
+                reply_markup=buttons,
+            )
+        except Exception:
+            pass
+
+    return ConversationHandler.END
+
+
+async def shop(update, context):
+    if not await gate(update, context):
+        return
+
+    uid = update.effective_user.id
+    l = lang(uid)
+    rows = []
+
+    for p in db.plans():
+        title = p["title_fa"] if l == "fa" else p["title_en"]
+        price = "نامحدود" if p["unlimited"] else f"{p['price']:,} تومان"
+        rows.append([
+            InlineKeyboardButton(
+                f"{title} — {price}",
+                callback_data=f"buy:{p['id']}",
+            )
+        ])
+
+    rows.append([
+        InlineKeyboardButton(tr(uid, "custom"), callback_data="custom")
+    ])
+
+    await update.message.reply_text(
+        tr(uid, "plans"),
+        reply_markup=InlineKeyboardMarkup(rows),
+    )
+
+
+def apply_discount(price, coupon):
+    if not coupon:
+        return price
+    if coupon["percent"]:
+        return max(0, int(price * (100 - coupon["percent"]) / 100))
+    return max(0, price - coupon["amount"])
+
+
+async def buy(update, context):
+    query = update.callback_query
+    await query.answer()
+    uid = query.from_user.id
+
+    try:
+        pid = int(query.data.split(":")[1])
+    except (ValueError, IndexError):
+        await query.message.reply_text("❌ سرویس نامعتبر است.")
+        return
+
+    p = db.get_plan(pid)
+    if not p or not p["active"]:
+        await query.message.reply_text("❌ این سرویس در دسترس نیست.")
+        return
+
+    coupon = context.user_data.get("coupon")
+    original_price = int(p["price"])
+    final_price = apply_discount(original_price, coupon)
+
+    discount_text = ""
+    if coupon:
+        percent = int(coupon["percent"] or 0)
+        amount = int(coupon["amount"] or 0)
+        saved = original_price - final_price
+        code = context.user_data.get("coupon_code", "فعال")
+        if percent:
+            discount_text = (
+                f"\n🎟 کد تخفیف: <code>{code}</code>"
+                f"\n🎁 تخفیف: <b>{percent}%</b>"
+                f"\n💸 مقدار تخفیف: <b>{saved:,} تومان</b>"
+            )
+        elif amount:
+            discount_text = (
+                f"\n🎟 کد تخفیف: <code>{code}</code>"
+                f"\n🎁 تخفیف: <b>{saved:,} تومان</b>"
+            )
+
+    title = p["title_fa"] if lang(uid) == "fa" else p["title_en"]
+
+    if lang(uid) == "fa":
+        text = (
+            "🛒 <b>تأیید خرید سرویس</b>\n\n"
+            f"📦 سرویس: <b>{title}</b>\n"
+            "⏳ مدت: <b>۱ ماه</b>\n"
+            "👤 کاربران: <b>نامحدود</b>\n"
+            f"💰 قیمت اصلی: <b>{original_price:,} تومان</b>"
+            f"{discount_text}\n"
+            f"\n💳 <b>قیمت نهایی: {final_price:,} تومان</b>\n\n"
+            "اگر اطلاعات بالا درست است، روی «✅ تأیید پرداخت» بزنید."
+        )
+        confirm_text = "✅ تأیید پرداخت"
+        cancel_text = "❌ لغو خرید"
+    else:
+        text = (
+            "🛒 <b>Confirm Service Purchase</b>\n\n"
+            f"📦 Service: <b>{title}</b>\n"
+            "⏳ Duration: <b>1 month</b>\n"
+            "👤 Users: <b>Unlimited</b>\n"
+            f"💰 Original price: <b>{original_price:,} Toman</b>"
+            f"{discount_text}\n"
+            f"\n💳 <b>Final price: {final_price:,} Toman</b>\n\n"
+            "If everything is correct, tap «✅ Confirm Payment»."
+        )
+        confirm_text = "✅ Confirm Payment"
+        cancel_text = "❌ Cancel Purchase"
+
+    context.user_data["pending_purchase"] = {
+        "plan_id": int(p["id"]),
+        "gb": p["gb"],
+        "unlimited": bool(p["unlimited"]),
+        "original_price": original_price,
+        "price": final_price,
+        "title": title,
+    }
+
+    keyboard = InlineKeyboardMarkup([
+        [InlineKeyboardButton(
+            confirm_text,
+            callback_data=f"confirm_buy:{p['id']}"
+        )],
+        [InlineKeyboardButton(
+            cancel_text,
+            callback_data="cancel_buy"
+        )],
+    ])
+
+    await query.message.reply_text(
+        text,
+        parse_mode="HTML",
+        reply_markup=keyboard,
+    )
+
+async def custom_start(update, context):
+    query = update.callback_query
+    await query.answer()
+    await query.message.reply_text(
+        tr(
+            query.from_user.id,
+            "custom_prompt",

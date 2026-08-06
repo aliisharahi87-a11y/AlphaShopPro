@@ -1,0 +1,300 @@
+import asyncio
+
+from telegram import Update, InlineKeyboardButton, InlineKeyboardMarkup, ReplyKeyboardMarkup
+from telegram.ext import (
+    Application,
+    CallbackQueryHandler,
+    CommandHandler,
+    ConversationHandler,
+    MessageHandler,
+    ContextTypes,
+    filters,
+)
+
+from config import *
+import database as db
+from panel import create_customer
+
+
+DEP_AMOUNT, DEP_RECEIPT, CUSTOM_GB, COUPON_INPUT = range(4)
+
+TEXT = {
+    "fa": {
+        "welcome": "🌹 سلام {name} عزیز!\n\nبه آلفا شاپ خوش اومدی ❤️\nاز منوی زیر می‌تونی سرویس، کیف پول و حساب کاربری خودت رو مدیریت کنی.",
+        "need": "🔒 برای استفاده از خدمات آلفا شاپ، ابتدا باید در کانال ما عضو بشی.",
+        "joined": "✅ عضویتت با موفقیت تأیید شد. خوش اومدی 🌹",
+        "join": "📢 عضویت در کانال",
+        "check": "✅ بررسی عضویت",
+        "buy": "🛒 خرید سرویس",
+        "wallet": "💰 کیف پول",
+        "refs": "👥 زیرمجموعه‌گیری",
+        "orders": "📦 سفارش‌های من",
+        "support": "📞 پشتیبانی",
+        "settings": "⚙️ تنظیمات",
+        "guide": "📚 راهنما",
+        "lang": "🌐 تغییر زبان",
+        "back": "🔙 بازگشت",
+        "deposit": "➕ افزایش موجودی",
+        "coupon": "🎟 کد تخفیف",
+        "balance": "💰 موجودی کیف پول شما: {amount:,} تومان",
+        "deposit_amount": "💳 مبلغ موردنظر برای افزایش موجودی را به تومان وارد کنید:",
+        "min_deposit": "❌ حداقل مبلغ افزایش موجودی ۱,۰۰۰ تومان است.",
+        "invalid_amount": "❌ لطفاً یک مبلغ معتبر وارد کنید.",
+        "payment_info": "💳 اطلاعات پرداخت\n\nشماره کارت:\n{card}\n\nنام صاحب کارت:\n{holder}\n\nمبلغ: {amount:,} تومان\n\n📸 پس از پرداخت، تصویر رسید را همین‌جا ارسال کنید.",
+        "receipt_only": "📸 لطفاً تصویر رسید پرداخت را ارسال کنید.",
+        "receipt_saved": "✅ رسید شما با موفقیت ثبت شد.\n\nشماره پیگیری: #{rid}\nپس از بررسی ادمین، موجودی کیف پول شما افزایش پیدا می‌کند. 🌹",
+        "plans": "🛒 یکی از سرویس‌های زیر را انتخاب کنید:",
+        "custom": "✏️ حجم دلخواه",
+        "custom_prompt": "✏️ حجم موردنظر را به GB وارد کنید.\n\n💰 قیمت هر گیگ: {price:,} تومان",
+        "invalid_gb": "❌ حجم باید یک عدد صحیح بزرگ‌تر از صفر باشد.",
+        "not_enough": "❌ موجودی کیف پول کافی نیست.\n\nموجودی: {balance:,} تومان\nقیمت: {price:,} تومان\n\nابتدا کیف پول خود را شارژ کنید.",
+        "order_success": "🎉 سفارش شما با موفقیت ثبت شد!\n\n🧾 شماره سفارش: #{oid}\n📦 حجم: {gb}\n💰 مبلغ: {price:,} تومان\n👤 نام کاربری: {username}\n\n🔗 اطلاعات اتصال:\n{config}",
+        "panel_error": "⚠️ سفارش ثبت شد اما اتصال به پنل با موفقیت انجام نشد؛ مبلغ سفارش به کیف پول شما برگشت داده شد.\n\nلطفاً با پشتیبانی تماس بگیرید.",
+        "ref": "👥 تعداد زیرمجموعه‌های شما: {count}\n🎁 درصد پاداش فعلی: {percent}%\n\n🔗 لینک دعوت شما:\n{link}",
+        "no_orders": "📦 هنوز سفارشی ثبت نکرده‌اید.",
+        "support_text": "📞 پشتیبانی آلفا شاپ\n\nبرای ارتباط با پشتیبانی از آیدی زیر استفاده کنید:\n{support}",
+        "account": "👤 حساب کاربری\n\n🆔 شناسه: {id}\n💰 موجودی: {balance:,} تومان\n🌐 زبان: فارسی",
+        "settings_text": "⚙️ تنظیمات حساب\n\nاز دکمه‌های زیر می‌توانید زبان حساب را تغییر دهید.",
+        "language_changed": "🇮🇷 زبان حساب روی فارسی تنظیم شد.",
+        "coupon_prompt": "🎟 کد تخفیف خود را ارسال کنید:",
+        "coupon_ok": "✅ کد تخفیف معتبر است. هنگام خرید قابل استفاده خواهد بود.",
+        "coupon_bad": "❌ کد تخفیف نامعتبر، منقضی یا قبلاً استفاده شده است.",
+        "guide_text": "📚 راهنمای آلفا شاپ\n\n"
+                      "1️⃣ ابتدا عضو کانال شوید و روی «بررسی عضویت» بزنید.\n"
+                      "2️⃣ از بخش «کیف پول» موجودی خود را افزایش دهید.\n"
+                      "3️⃣ مبلغ را به کارت اعلام‌شده واریز کنید و رسید را ارسال کنید.\n"
+                      "4️⃣ پس از تأیید ادمین، موجودی به کیف پول شما اضافه می‌شود.\n"
+                      "5️⃣ از «خرید سرویس» حجم دلخواه خود را انتخاب کنید.\n"
+                      "6️⃣ پرداخت از موجودی کیف پول انجام می‌شود.\n"
+                      "7️⃣ در صورت فعال بودن API پنل، سرویس به‌صورت خودکار ساخته و اطلاعات اتصال ارسال می‌شود.\n\n"
+                      "💡 در صورت هرگونه مشکل، با پشتیبانی در ارتباط باشید.",
+        "admin_only": "⛔ این بخش فقط برای مدیران است.",
+    },
+    "en": {
+        "welcome": "🌹 Hello {name}!\n\nWelcome to Alpha Shop ❤️\nUse the menu below to manage your services, wallet and account.",
+        "need": "🔒 Please join our channel before using Alpha Shop.",
+        "joined": "✅ Your membership has been verified. Welcome! 🌹",
+        "join": "📢 Join Channel",
+        "check": "✅ Check Membership",
+        "buy": "🛒 Buy Service",
+        "wallet": "💰 Wallet",
+        "refs": "👥 Referrals",
+        "orders": "📦 My Orders",
+        "support": "📞 Support",
+        "settings": "⚙️ Settings",
+        "guide": "📚 Guide",
+        "lang": "🌐 Change Language",
+        "back": "🔙 Back",
+        "deposit": "➕ Add Balance",
+        "coupon": "🎟 Coupon Code",
+        "balance": "💰 Your wallet balance: {amount:,} Toman",
+        "deposit_amount": "💳 Enter the amount you want to add in Toman:",
+        "min_deposit": "❌ Minimum deposit is 1,000 Toman.",
+        "invalid_amount": "❌ Please enter a valid amount.",
+        "payment_info": "💳 Payment Information\n\nCard number:\n{card}\n\nCard holder:\n{holder}\n\nAmount: {amount:,} Toman\n\n📸 After payment, send the receipt image here.",
+        "receipt_only": "📸 Please send the payment receipt image.",
+        "receipt_saved": "✅ Your receipt has been submitted.\n\nTracking ID: #{rid}\nYour wallet will be credited after admin review. 🌹",
+        "plans": "🛒 Choose one of the services below:",
+        "custom": "✏️ Custom Volume",
+        "custom_prompt": "✏️ Enter the desired volume in GB.\n\n💰 Price per GB: {price:,} Toman",
+        "invalid_gb": "❌ Volume must be a whole number greater than zero.",
+        "not_enough": "❌ Insufficient wallet balance.\n\nBalance: {balance:,} Toman\nPrice: {price:,} Toman\n\nPlease add balance first.",
+        "order_success": "🎉 Your order was completed successfully!\n\n🧾 Order: #{oid}\n📦 Volume: {gb}\n💰 Amount: {price:,} Toman\n👤 Username: {username}\n\n🔗 Connection information:\n{config}",
+        "panel_error": "⚠️ The order could not be provisioned through the panel. Your payment was refunded to your wallet.\n\nPlease contact support.",
+        "ref": "👥 Your referrals: {count}\n🎁 Current reward: {percent}%\n\n🔗 Your referral link:\n{link}",
+        "no_orders": "📦 You have no orders yet.",
+        "support_text": "📞 Alpha Shop Support\n\nContact us using:\n{support}",
+        "account": "👤 Account\n\n🆔 ID: {id}\n💰 Balance: {balance:,} Toman\n🌐 Language: English",
+        "settings_text": "⚙️ Account Settings\n\nUse the buttons below to change your language.",
+        "language_changed": "🇬🇧 Account language changed to English.",
+        "coupon_prompt": "🎟 Send your coupon code:",
+        "coupon_ok": "✅ Coupon is valid and can be used during a purchase.",
+        "coupon_bad": "❌ Coupon is invalid, expired or already used.",
+        "guide_text": "📚 Alpha Shop Guide\n\n"
+                      "1️⃣ Join the required channel and tap Check Membership.\n"
+                      "2️⃣ Open Wallet and add balance.\n"
+                      "3️⃣ Transfer the amount to the displayed card and send the receipt.\n"
+                      "4️⃣ After admin approval, the amount is added to your wallet.\n"
+                      "5️⃣ Open Buy Service and choose your volume.\n"
+                      "6️⃣ The purchase is paid from your wallet.\n"
+                      "7️⃣ If the panel API is configured, the customer is created automatically and connection details are sent.\n\n"
+                      "💡 Contact support if you need help.",
+        "admin_only": "⛔ This section is for administrators only.",
+    },
+}
+
+
+def lang(uid):
+    u = db.get_user(uid)
+    return u["lang"] if u and u["lang"] in TEXT else "fa"
+
+
+def tr(uid, key, **kwargs):
+    return TEXT[lang(uid)][key].format(**kwargs)
+
+
+def menu(uid):
+    return ReplyKeyboardMarkup(
+        [
+            [tr(uid, "buy"), tr(uid, "wallet")],
+            [tr(uid, "refs"), tr(uid, "orders")],
+            [tr(uid, "support"), tr(uid, "settings")],
+            [tr(uid, "guide")],
+        ],
+        resize_keyboard=True,
+    )
+
+
+def force_keyboard(uid):
+    l = lang(uid)
+    return InlineKeyboardMarkup(
+        [
+            [
+                InlineKeyboardButton(
+                    TEXT[l]["join"],
+                    url=f"https://t.me/{REQUIRED_CHANNEL.lstrip('@')}",
+                )
+            ],
+            [InlineKeyboardButton(TEXT[l]["check"], callback_data="check")],
+        ]
+    )
+
+
+async def is_member(bot, uid):
+    try:
+        member = await bot.get_chat_member(REQUIRED_CHANNEL, uid)
+        if member.status in ("member", "administrator", "creator"):
+            return True
+        if member.status == "restricted" and getattr(member, "is_member", False):
+            return True
+        return False
+    except Exception:
+        return False
+
+
+async def gate(update, context):
+    uid = update.effective_user.id
+    user = update.effective_user
+
+    # اطمینان از وجود کاربر در دیتابیس
+    u = db.get_user(uid)
+
+    if u is None:
+        db.upsert_user(user)
+        u = db.get_user(uid)
+
+    if u is None:
+        await update.effective_message.reply_text(
+            "⚠️ خطایی در ساخت حساب کاربری رخ داد. لطفاً دوباره /start را بزنید."
+        )
+        return False
+
+    if u["blocked"]:
+        await update.effective_message.reply_text(
+            "⛔ حساب شما مسدود است."
+        )
+        return False
+
+    if await is_member(context.bot, uid):
+        return True
+
+    await update.effective_message.reply_text(
+        tr(uid, "need"),
+        reply_markup=force_keyboard(uid),
+    )
+
+    return False
+async def notify_referrer(update, context, referrer_id, new_user):
+    """
+    وقتی کاربر جدید با لینک دعوت وارد می‌شود:
+    - یک کد تخفیف 5 درصدی برای معرف می‌سازد.
+    - کد را در دیتابیس ذخیره می‌کند.
+    - پیام کامل و صمیمانه برای معرف ارسال می‌کند.
+    """
+    try:
+        # ساخت کد اختصاصی برای معرف
+        code = f"REF5_{referrer_id}_{new_user.id}"
+
+        # جلوگیری از ساخت دوباره همان کد
+        existing = db.get_coupon(code)
+        if existing:
+            return
+
+        # ساخت کد تخفیف 5 درصدی
+        db.create_coupon(
+            code,
+            percent=5,
+            max_uses=1,
+        )
+
+        name = new_user.first_name or "یک کاربر جدید"
+
+        if lang(referrer_id) == "fa":
+            message = (
+                "🎉 <b>تبریک! یک زیرمجموعه جدید به شما اضافه شد</b> 🌹\n\n"
+                f"👤 کاربر جدید: <b>{name}</b>\n"
+                f"🆔 شناسه: <code>{new_user.id}</code>\n\n"
+                "🎁 به پاس دعوت موفق شما، یک کد تخفیف <b>۵٪</b> برایتان فعال شد.\n\n"
+                f"🎟 کد تخفیف شما:\n"
+                f"<code>{code}</code>\n\n"
+                "💡 این کد برای یک بار قابل استفاده است و می‌توانید "
+                "هنگام خرید سرویس از آن استفاده کنید.\n\n"
+                "🙏 ممنون که آلفا شاپ را به دوستانتان معرفی می‌کنید ❤️"
+            )
+        else:
+            message = (
+                "🎉 <b>Congratulations! You got a new referral</b> 🌹\n\n"
+                f"👤 New user: <b>{name}</b>\n"
+                f"🆔 User ID: <code>{new_user.id}</code>\n\n"
+                "🎁 As a reward for your successful referral, "
+                "you received a <b>5% discount coupon</b>.\n\n"
+                f"🎟 Your coupon code:\n"
+                f"<code>{code}</code>\n\n"
+                "💡 This coupon can be used once when purchasing a service.\n\n"
+                "🙏 Thank you for recommending Alpha Shop to your friends ❤️"
+            )
+
+        await context.bot.send_message(
+            chat_id=referrer_id,
+            text=message,
+            parse_mode="HTML",
+        )
+
+    except Exception as e:
+        print(f"Referral notification error: {e}")
+
+async def start(update, context):
+    user = update.effective_user
+
+    # بررسی اینکه آیا کاربر قبلاً ثبت شده است
+    existing_user = db.get_user(user.id)
+
+    ref = None
+
+    # فقط برای کاربر جدید، لینک دعوت بررسی شود
+    if existing_user is None:
+        if context.args and context.args[0].isdigit():
+            candidate = int(context.args[0])
+
+            if candidate != user.id and db.get_user(candidate):
+                ref = candidate
+
+    # ساخت یا بروزرسانی کاربر
+    db.upsert_user(user, ref)
+
+    # اگر کاربر جدید از طریق لینک دعوت وارد شده،
+    # به معرف جایزه بده
+    if existing_user is None and ref:
+        await notify_referrer(
+            update,
+            context,
+            ref,
+            user,
+        )
+
+    if not await gate(update, context):
+        return
+
+    await update.message.reply_text(
+        tr(
+            user.id,

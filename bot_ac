@@ -1,0 +1,300 @@
+            price=CUSTOM_PRICE_PER_GB,
+        )
+    )
+    return CUSTOM_GB
+
+
+async def custom_gb(update, context):
+    uid = update.effective_user.id
+
+    try:
+        gb = int(update.message.text.strip())
+    except ValueError:
+        await update.message.reply_text(tr(uid, "invalid_gb"))
+        return CUSTOM_GB
+
+    if gb < 1:
+        await update.message.reply_text(tr(uid, "invalid_gb"))
+        return CUSTOM_GB
+
+    original_price = gb * CUSTOM_PRICE_PER_GB
+    coupon = context.user_data.get("coupon")
+    final_price = apply_discount(original_price, coupon)
+
+    discount_text = ""
+    if coupon:
+        percent = int(coupon["percent"] or 0)
+        amount = int(coupon["amount"] or 0)
+        saved = original_price - final_price
+        code = context.user_data.get("coupon_code", "فعال")
+        if percent:
+            discount_text = (
+                f"\n🎟 کد تخفیف: <code>{code}</code>"
+                f"\n🎁 تخفیف: <b>{percent}%</b>"
+                f"\n💸 مقدار تخفیف: <b>{saved:,} تومان</b>"
+            )
+        elif amount:
+            discount_text = (
+                f"\n🎟 کد تخفیف: <code>{code}</code>"
+                f"\n🎁 تخفیف: <b>{saved:,} تومان</b>"
+            )
+
+    if lang(uid) == "fa":
+        text = (
+            "🛒 <b>تأیید خرید حجم دلخواه</b>\n\n"
+            f"📦 حجم: <b>{gb} GB</b>\n"
+            "⏳ مدت: <b>۱ ماه</b>\n"
+            "👤 کاربران: <b>نامحدود</b>\n"
+            f"💰 قیمت اصلی: <b>{original_price:,} تومان</b>"
+            f"{discount_text}\n"
+            f"\n💳 <b>قیمت نهایی: {final_price:,} تومان</b>\n\n"
+            "اگر اطلاعات بالا درست است، روی «✅ تأیید پرداخت» بزنید."
+        )
+        confirm_text = "✅ تأیید پرداخت"
+        cancel_text = "❌ لغو خرید"
+    else:
+        text = (
+            "🛒 <b>Confirm Custom Purchase</b>\n\n"
+            f"📦 Volume: <b>{gb} GB</b>\n"
+            "⏳ Duration: <b>1 month</b>\n"
+            "👤 Users: <b>Unlimited</b>\n"
+            f"💰 Original price: <b>{original_price:,} Toman</b>"
+            f"{discount_text}\n"
+            f"\n💳 <b>Final price: {final_price:,} Toman</b>\n\n"
+            "If everything is correct, tap «✅ Confirm Payment»."
+        )
+        confirm_text = "✅ Confirm Payment"
+        cancel_text = "❌ Cancel Purchase"
+
+    context.user_data["pending_purchase"] = {
+        "plan_id": None,
+        "gb": gb,
+        "unlimited": False,
+        "original_price": original_price,
+        "price": final_price,
+        "title": f"{gb} GB",
+    }
+
+    keyboard = InlineKeyboardMarkup([
+        [InlineKeyboardButton(confirm_text, callback_data="confirm_custom")],
+        [InlineKeyboardButton(cancel_text, callback_data="cancel_buy")],
+    ])
+
+    await update.message.reply_text(
+        text,
+        parse_mode="HTML",
+        reply_markup=keyboard,
+    )
+
+    return ConversationHandler.END
+
+async def coupon_start(update, context):
+    query = update.callback_query
+    uid = query.from_user.id
+    await query.answer()
+
+    context.user_data.pop("coupon", None)
+    context.user_data.pop("coupon_code", None)
+
+    if lang(uid) == "fa":
+        text = (
+            "🎟 <b>کد تخفیف</b>\n\n"
+            "کد تخفیف خود را ارسال کنید.\n"
+            "برای برگشت، یکی از دکمه‌های منو را انتخاب کنید."
+        )
+    else:
+        text = (
+            "🎟 <b>Coupon Code</b>\n\n"
+            "Send your coupon code.\n"
+            "To leave this section, use one of the menu buttons."
+        )
+
+    await query.message.reply_text(
+        text,
+        parse_mode="HTML",
+        reply_markup=menu(uid),
+    )
+    return COUPON_INPUT
+
+
+async def coupon_input(update, context):
+    uid = update.effective_user.id
+    code = update.message.text.strip().upper()
+
+    menu_values = {
+        "🏠 منوی اصلی", "🛒 فروشگاه", "💰 کیف پول",
+        "👤 حساب کاربری", "👥 زیرمجموعه‌گیری", "📞 پشتیبانی",
+        "⚙️ تنظیمات", "📚 راهنما", "🛒 خرید سرویس", "📦 سفارش‌های من",
+        "🏠 MAIN MENU", "🛒 SHOP", "💰 WALLET",
+        "👤 ACCOUNT", "👥 REFERRALS", "📞 SUPPORT",
+        "⚙️ SETTINGS", "📚 GUIDE", "🛒 BUY SERVICE", "📦 MY ORDERS",
+    }
+
+    if code in menu_values:
+        await update.message.reply_text(
+            tr(uid, "welcome", name=update.effective_user.first_name or ""),
+            reply_markup=menu(uid),
+        )
+        return ConversationHandler.END
+
+    if not code:
+        await update.message.reply_text(
+            tr(uid, "coupon_bad"),
+            reply_markup=menu(uid),
+        )
+        return COUPON_INPUT
+
+    coupon = db.get_coupon(code)
+    if not coupon:
+        await update.message.reply_text(
+            tr(uid, "coupon_bad") +
+            "\n\n🔄 لطفاً یک کد تخفیف معتبر وارد کنید.",
+            reply_markup=menu(uid),
+        )
+        return COUPON_INPUT
+
+    if coupon["max_uses"] and coupon["used"] >= coupon["max_uses"]:
+        await update.message.reply_text(
+            tr(uid, "coupon_bad") +
+            "\n\n🔄 ظرفیت استفاده از این کد تمام شده است.",
+            reply_markup=menu(uid),
+        )
+        return COUPON_INPUT
+
+    has_used = getattr(db, "has_coupon_used", None)
+    if has_used and has_used(code, uid):
+        await update.message.reply_text(
+            "❌ شما قبلاً از این کد تخفیف استفاده کرده‌اید.\n\n"
+            "🔄 لطفاً کد دیگری وارد کنید.",
+            reply_markup=menu(uid),
+        )
+        return COUPON_INPUT
+
+    # IMPORTANT: do not call use_coupon here.
+    # The coupon is consumed only after successful purchase.
+    context.user_data["coupon"] = dict(coupon)
+    context.user_data["coupon_code"] = code
+
+    percent = int(coupon["percent"] or 0)
+    amount = int(coupon["amount"] or 0)
+    discount_text = f"{percent}%" if percent else f"{amount:,} تومان"
+
+    if lang(uid) == "fa":
+        message = (
+            "✅ <b>کد تخفیف فعال شد!</b>\n\n"
+            f"🎟 کد: <code>{code}</code>\n"
+            f"🎁 میزان تخفیف: <b>{discount_text}</b>\n\n"
+            "این کد تا زمان خرید در حساب شما باقی می‌ماند.\n"
+            "اگر خرید را لغو کنید، کد تخفیف حذف نمی‌شود. 🌹"
+        )
+    else:
+        message = (
+            "✅ <b>Coupon activated!</b>\n\n"
+            f"🎟 Code: <code>{code}</code>\n"
+            f"🎁 Discount: <b>{discount_text}</b>\n\n"
+            "The coupon remains active until a successful purchase.\n"
+            "If you cancel the purchase, it will not be removed. 🌹"
+        )
+
+    await update.message.reply_text(
+        message,
+        parse_mode="HTML",
+        reply_markup=menu(uid),
+    )
+    return ConversationHandler.END
+
+async def _complete_pending_purchase(update, context):
+    query = update.callback_query
+    uid = query.from_user.id
+    pending = context.user_data.get("pending_purchase")
+
+    if not pending:
+        await query.answer("❌ سفارش منقضی شده است.", show_alert=True)
+        return
+
+    await query.answer()
+
+    u = db.get_user(uid)
+    if not u:
+        await query.message.reply_text("❌ حساب کاربری پیدا نشد.")
+        context.user_data.pop("pending_purchase", None)
+        return
+
+    price = int(pending["price"])
+    gb = pending["gb"]
+    unlimited = bool(pending["unlimited"])
+    plan_id = pending["plan_id"]
+
+    if u["balance"] < price:
+        await query.message.reply_text(
+            tr(uid, "not_enough", balance=u["balance"], price=price),
+            reply_markup=menu(uid),
+        )
+        return
+
+    oid = db.create_order(uid, plan_id, gb, price)
+    if not oid:
+        await query.message.reply_text(
+            tr(uid, "not_enough", balance=u["balance"], price=price),
+            reply_markup=menu(uid),
+        )
+        return
+
+    username = f"alpha_{uid}_{oid}"
+    result = await create_customer(username, gb, unlimited)
+
+    if not result["ok"]:
+        db.refund(oid, uid, price)
+        context.user_data.pop("pending_purchase", None)
+        await query.message.reply_text(
+            tr(uid, "panel_error"),
+            reply_markup=menu(uid),
+        )
+        return
+
+    data = result.get("data") or {}
+
+    config = (
+        result.get("config")
+        or data.get("config")
+        or data.get("subscription")
+        or data.get("subscription_url")
+        or data.get("link")
+        or data.get("url")
+        or ""
+    )
+    final_username = data.get("username", username)
+
+    db.complete_order(oid, final_username, str(config))
+
+    # Only clear coupon after successful purchase.
+    context.user_data.pop("pending_purchase", None)
+    context.user_data.pop("coupon", None)
+    context.user_data.pop("coupon_code", None)
+
+    await query.message.reply_text(
+        tr(
+            uid,
+            "order_success",
+            oid=oid,
+            gb="Unlimited" if unlimited else f"{gb} GB",
+            price=price,
+            username=final_username,
+            config=config or "Panel API did not return connection details.",
+        ),
+        reply_markup=menu(uid),
+    )
+
+
+async def confirm_buy(update, context):
+    query = update.callback_query
+    try:
+        pid = int(query.data.split(":")[1])
+    except (ValueError, IndexError):
+        await query.answer("❌ سفارش نامعتبر است.", show_alert=True)
+        return
+
+    pending = context.user_data.get("pending_purchase")
+    if not pending or pending.get("plan_id") != pid:
+        await query.answer("❌ سفارش پیدا نشد.", show_alert=True)
+        return
