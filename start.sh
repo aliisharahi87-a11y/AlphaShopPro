@@ -1,2 +1,3 @@
-#!/bin/bash
-python web.py
+#!/usr/bin/env bash
+
+python3 web.py
