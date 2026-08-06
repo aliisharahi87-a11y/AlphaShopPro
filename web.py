@@ -7,23 +7,20 @@ app = Flask(__name__)
 
 @app.route("/")
 def home():
-    return "AlphaShopPro Bot is Running"
+    return "AlphaShopPro Bot Running"
 
 def start_bot():
     try:
         import bot
+        print("Starting Telegram bot...")
         bot.run_bot()
     except Exception:
         traceback.print_exc()
 
 if __name__ == "__main__":
-    threading.Thread(target=start_bot, daemon=True).start()
-
-    print("Starting Flask on port", os.environ.get("PORT"))
+    threading.Thread(target=start_bot).start()
 
     app.run(
         host="0.0.0.0",
-        port=int(os.environ.get("PORT", 10000)),
-        debug=False,
-        use_reloader=False,
+        port=int(os.environ.get("PORT", 10000))
     )
