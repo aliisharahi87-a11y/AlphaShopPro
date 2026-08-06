@@ -1,7 +1,5 @@
 from flask import Flask
 import threading
-import traceback
-import time
 import os
 
 app = Flask(__name__)
@@ -10,25 +8,16 @@ app = Flask(__name__)
 def home():
     return "AlphaShopPro Bot Running ✅"
 
-def run_web():
+def start_bot():
+    import bot
+    bot.run_bot()
+
+threading.Thread(target=start_bot, daemon=True).start()
+
+if __name__ == "__main__":
     app.run(
         host="0.0.0.0",
         port=int(os.environ.get("PORT", 10000)),
         debug=False,
-        use_reloader=False,
+        use_reloader=False
     )
-
-def run_bot_forever():
-    while True:
-        try:
-            import bot
-            print("Starting Telegram Bot...", flush=True)
-            bot.run_bot()
-        except Exception:
-            traceback.print_exc()
-            print("Bot crashed. Restarting in 5 seconds...", flush=True)
-            time.sleep(5)
-
-if __name__ == "__main__":
-    threading.Thread(target=run_web, daemon=True).start()
-    run_bot_forever()

@@ -1,1 +1,1 @@
-web: bash start.sh
+web: python3 web.py
