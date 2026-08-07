@@ -1277,12 +1277,29 @@ async def free_trial(update, context):
     )
 
 def run_bot():
+    import asyncio
+
+    print("🚀 run_bot() started")
+
     if not BOT_TOKEN:
         raise RuntimeError("BOT_TOKEN is missing in .env/config.py")
 
+    # اطمینان از وجود Event Loop
+    try:
+        asyncio.get_event_loop()
+    except RuntimeError:
+        loop = asyncio.new_event_loop()
+        asyncio.set_event_loop(loop)
+
+    print("✅ Event loop ready")
+
     db.init_db()
 
+    print("✅ Database initialized")
+
     app = Application.builder().token(BOT_TOKEN).build()
+
+    print("✅ Telegram Application created")
 
     deposit_conv = ConversationHandler(
         entry_points=[
