@@ -2,6 +2,7 @@ from flask import Flask
 import threading
 import traceback
 import os
+import asyncio
 import time
 
 app = Flask(__name__)
@@ -15,18 +16,23 @@ def home():
 def start_bot():
     while True:
         try:
-            print("🚀 Starting Telegram bot...")
+            loop = asyncio.new_event_loop()
+            asyncio.set_event_loop(loop)
+
+            print("✅ Event loop created")
 
             import bot
 
-            print("✅ Bot imported successfully")
+            print("✅ Bot imported")
 
             bot.run_bot()
 
-            print("⚠️ bot.run_bot() stopped. Restarting in 5 seconds...")
+            print("⚠️ Bot stopped")
+
+            loop.close()
 
         except Exception:
-            print("❌ BOT CRASHED:")
+            print("❌ BOT ERROR:")
             traceback.print_exc()
 
         time.sleep(5)
