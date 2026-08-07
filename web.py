@@ -15,14 +15,15 @@ def home():
 def start_bot():
     while True:
         try:
-            print("Starting Telegram bot...")
+            print("🚀 Starting Telegram bot...")
 
             import bot
 
-            print("Bot imported successfully")
+            print("✅ Bot imported successfully")
+
             bot.run_bot()
 
-            print("⚠️ bot.run_bot() stopped! Restarting in 5 seconds...")
+            print("⚠️ bot.run_bot() stopped. Restarting in 5 seconds...")
 
         except Exception:
             print("❌ BOT CRASHED:")
@@ -35,6 +36,7 @@ if __name__ == "__main__":
     bot_thread = threading.Thread(
         target=start_bot,
         daemon=True,
+        name="start_bot",
     )
 
     bot_thread.start()
