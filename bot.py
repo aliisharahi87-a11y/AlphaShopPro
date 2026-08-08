@@ -743,6 +743,10 @@ async def coupon_input(update, context):
     }
 
     if code in menu_values:
+        if code in {"🎁 تست رایگان", "🎁 FREE TRIAL"}:
+            await free_trial(update, context)
+            return ConversationHandler.END
+
         await update.message.reply_text(
             tr(uid, "welcome", name=update.effective_user.first_name or ""),
             reply_markup=menu(uid),
