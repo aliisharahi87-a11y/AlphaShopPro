@@ -736,10 +736,12 @@ async def coupon_input(update, context):
     menu_values = {
         "🏠 منوی اصلی", "🛒 فروشگاه", "💰 کیف پول",
         "👤 حساب کاربری", "👥 زیرمجموعه‌گیری", "📞 پشتیبانی",
-        "⚙️ تنظیمات", "📚 راهنما", "🛒 خرید سرویس", "📦 سفارش‌های من",
+        "⚙️ تنظیمات", "📚 راهنما", "🛒 خرید سرویس",
+        "📦 سفارش‌های من", "🎁 تست رایگان",
         "🏠 MAIN MENU", "🛒 SHOP", "💰 WALLET",
         "👤 ACCOUNT", "👥 REFERRALS", "📞 SUPPORT",
-        "⚙️ SETTINGS", "📚 GUIDE", "🛒 BUY SERVICE", "📦 MY ORDERS",
+        "⚙️ SETTINGS", "📚 GUIDE", "🛒 BUY SERVICE",
+        "📦 MY ORDERS", "🎁 FREE TRIAL",
     }
 
     if code in menu_values:
@@ -1350,6 +1352,10 @@ def run_bot():
         states={
             COUPON_INPUT: [
                 MessageHandler(
+                    filters.Regex(r"^(🎁 تست رایگان|🎁 Free Trial)$"),
+                    free_trial,
+                ),
+                MessageHandler(
                     filters.TEXT
                     & ~filters.COMMAND
                     & ~filters.Regex(
@@ -1361,7 +1367,7 @@ def run_bot():
                         r"⚙️ Settings|📚 Guide|🛒 Buy Service|📦 My Orders)$"
                     ),
                     coupon_input,
-                )
+                ),
             ],
         },
         fallbacks=[CommandHandler("start", start)],
