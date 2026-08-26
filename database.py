@@ -25,7 +25,9 @@ def init_db():
             lang TEXT DEFAULT 'fa',
             blocked INTEGER DEFAULT 0,
             created_at INTEGER,
-            trial_used INTEGER DEFAULT 0
+            trial_used INTEGER DEFAULT 0,
+            trial_gold_used INTEGER DEFAULT 0,
+            trial_silver_used INTEGER DEFAULT 0
         );
 
         CREATE TABLE IF NOT EXISTS plans(
@@ -36,7 +38,8 @@ def init_db():
             price INTEGER DEFAULT 0,
             unlimited INTEGER DEFAULT 0,
             active INTEGER DEFAULT 1,
-            sort_order INTEGER DEFAULT 0
+            sort_order INTEGER DEFAULT 0,
+            service TEXT DEFAULT 'gold'
         );
 
         CREATE TABLE IF NOT EXISTS deposits(
@@ -57,7 +60,8 @@ def init_db():
             status TEXT DEFAULT 'pending',
             panel_username TEXT,
             config TEXT,
-            created_at INTEGER
+            created_at INTEGER,
+            service TEXT DEFAULT 'gold'
         );
 
         CREATE TABLE IF NOT EXISTS transactions(
@@ -91,22 +95,45 @@ def init_db():
         );
         """)
 
-        try:
-            c.execute("ALTER TABLE users ADD COLUMN trial_used INTEGER DEFAULT 0")
-        except sqlite3.OperationalError:
-            pass
+        for stmt in (
+            "ALTER TABLE users ADD COLUMN trial_gold_used INTEGER DEFAULT 0",
+            "ALTER TABLE users ADD COLUMN trial_silver_used INTEGER DEFAULT 0",
+            "ALTER TABLE plans ADD COLUMN service TEXT DEFAULT 'gold'",
+            "ALTER TABLE orders ADD COLUMN service TEXT DEFAULT 'gold'",
+        ):
+            try:
+                c.execute(stmt)
+            except sqlite3.OperationalError:
+                pass
+
+        # Existing plans are the Gold service.
+        c.execute("UPDATE plans SET service='gold' WHERE service IS NULL OR service=''" )
 
         if c.execute("SELECT COUNT(*) FROM plans").fetchone()[0] == 0:
             c.executemany(
                 """INSERT INTO plans
-                (title_fa,title_en,gb,price,unlimited,active,sort_order)
-                VALUES(?,?,?,?,?,?,?)""",
+                (title_fa,title_en,gb,price,unlimited,active,sort_order,service)
+                VALUES(?,?,?,?,?,?,?,?)""",
                 [
-                    ("۵ گیگ", "5 GB", 5, 20000, 0, 1, 1),
-                    ("۱۰ گیگ", "10 GB", 10, 40000, 0, 1, 2),
-                    ("۲۰ گیگ", "20 GB", 20, 80000, 0, 1, 3),
-                    ("۴۰ گیگ", "40 GB", 40, 160000, 0, 1, 4),
-                    ("نامحدود", "Unlimited", None, 0, 1, 0, 5),
+                    ("۵ گیگ", "5 GB", 5, 20000, 0, 1, 1, "gold"),
+                    ("۱۰ گیگ", "10 GB", 10, 40000, 0, 1, 2, "gold"),
+                    ("۲۰ گیگ", "20 GB", 20, 80000, 0, 1, 3, "gold"),
+                    ("۴۰ گیگ", "40 GB", 40, 160000, 0, 1, 4, "gold"),
+                    ("نامحدود", "Unlimited", None, 0, 1, 0, 5, "gold"),
+                ],
+            )
+
+        # Add Silver plans once, using the same volumes at 2,000 Toman/GB.
+        if c.execute("SELECT COUNT(*) FROM plans WHERE service='silver'").fetchone()[0] == 0:
+            c.executemany(
+                """INSERT INTO plans
+                (title_fa,title_en,gb,price,unlimited,active,sort_order,service)
+                VALUES(?,?,?,?,?,?,?,?)""",
+                [
+                    ("۵ گیگ سیلور", "5 GB Silver", 5, 10000, 0, 1, 1, "silver"),
+                    ("۱۰ گیگ سیلور", "10 GB Silver", 10, 20000, 0, 1, 2, "silver"),
+                    ("۲۰ گیگ سیلور", "20 GB Silver", 20, 40000, 0, 1, 3, "silver"),
+                    ("۴۰ گیگ سیلور", "40 GB Silver", 40, 80000, 0, 1, 4, "silver"),
                 ],
             )
 
@@ -141,13 +168,20 @@ def set_balance(uid, amount):
         c.execute("UPDATE users SET balance=? WHERE id=?", (amount, uid))
 
 
-def plans(include_inactive=False):
+def plans(service=None, include_inactive=False):
     with conn() as c:
         q = "SELECT * FROM plans"
+        clauses = []
+        params = []
         if not include_inactive:
-            q += " WHERE active=1"
+            clauses.append("active=1")
+        if service:
+            clauses.append("service=?")
+            params.append(service)
+        if clauses:
+            q += " WHERE " + " AND ".join(clauses)
         q += " ORDER BY sort_order,id"
-        return c.execute(q).fetchall()
+        return c.execute(q, params).fetchall()
 
 
 def get_plan(pid):
@@ -226,15 +260,15 @@ def review_deposit(did, approved):
         return d
 
 
-def create_order(uid, plan_id, gb, price):
+def create_order(uid, plan_id, gb, price, service="gold"):
     with LOCK, conn() as c:
         u = c.execute("SELECT balance FROM users WHERE id=?", (uid,)).fetchone()
         if not u or u["balance"] < price:
             return None
         oid = c.execute(
-            """INSERT INTO orders(user_id,plan_id,gb,price,created_at)
-               VALUES(?,?,?,?,?)""",
-            (uid, plan_id, gb, price, int(time.time())),
+            """INSERT INTO orders(user_id,plan_id,gb,price,created_at,service)
+               VALUES(?,?,?,?,?,?)""",
+            (uid, plan_id, gb, price, int(time.time()), service),
         ).lastrowid
         c.execute("UPDATE users SET balance=balance-? WHERE id=?", (price, uid))
         c.execute(
@@ -421,30 +455,26 @@ def add_balance(uid, amount, description="Admin balance"):
             (uid, "admin", amount, description, int(time.time())),
         )
 
-def has_used_trial(uid):
+def has_used_trial(uid, service="gold"):
+    column = "trial_silver_used" if service == "silver" else "trial_gold_used"
     with conn() as c:
-        row = c.execute(
-            "SELECT trial_used FROM users WHERE id=?",
-            (uid,),
-        ).fetchone()
-
+        row = c.execute(f"SELECT {column}, trial_used FROM users WHERE id=?", (uid,)).fetchone()
         if not row:
             return False
+        return bool(row[column] or (service == "gold" and row["trial_used"]))
 
-        return row["trial_used"] == 1
 
-
-def set_trial_used(uid):
+def set_trial_used(uid, service="gold"):
+    column = "trial_silver_used" if service == "silver" else "trial_gold_used"
     with conn() as c:
-        c.execute(
-            "UPDATE users SET trial_used=1 WHERE id=?",
-            (uid,),
-        )
+        c.execute(f"UPDATE users SET {column}=1 WHERE id=?", (uid,))
+        if service == "gold":
+            c.execute("UPDATE users SET trial_used=1 WHERE id=?", (uid,))
 
 
 def reset_trial(uid):
     with conn() as c:
         c.execute(
-            "UPDATE users SET trial_used=0 WHERE id=?",
+            "UPDATE users SET trial_used=0, trial_gold_used=0, trial_silver_used=0 WHERE id=?",
             (uid,),
         )

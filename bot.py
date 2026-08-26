@@ -1,7 +1,7 @@
 import asyncio
 
 from database import has_used_trial, set_trial_used
-from telegram import Update, InlineKeyboardButton, InlineKeyboardMarkup, ReplyKeyboardMarkup
+from telegram import Update, InlineKeyboardButton, InlineKeyboardMarkup, ReplyKeyboardMarkup, KeyboardButton
 from telegram.ext import (
     Application,
     CallbackQueryHandler,
@@ -46,6 +46,10 @@ TEXT = {
         "receipt_only": "📸 لطفاً تصویر رسید پرداخت را ارسال کنید.",
         "receipt_saved": "✅ رسید شما با موفقیت ثبت شد.\n\nشماره پیگیری: #{rid}\nپس از بررسی ادمین، موجودی کیف پول شما افزایش پیدا می‌کند. 🌹",
         "plans": "🛒 یکی از سرویس‌های زیر را انتخاب کنید:",
+        "choose_service": "🔌 سرویس موردنظر را انتخاب کنید:",
+        "gold": "🥇 سرویس Gold",
+        "silver": "🥈 سرویس Silver",
+        "trial_choose": "🎁 نوع تست رایگان را انتخاب کنید:",
         "custom": "✏️ حجم دلخواه",
         "custom_prompt": "✏️ حجم موردنظر را به GB وارد کنید.\n\n💰 قیمت هر گیگ: {price:,} تومان",
         "invalid_gb": "❌ حجم باید یک عدد صحیح بزرگ‌تر از صفر باشد.",
@@ -102,6 +106,10 @@ TEXT = {
         "receipt_only": "📸 Please send the payment receipt image.",
         "receipt_saved": "✅ Your receipt has been submitted.\n\nTracking ID: #{rid}\nYour wallet will be credited after admin review. 🌹",
         "plans": "🛒 Choose one of the services below:",
+        "choose_service": "🔌 Choose your service:",
+        "gold": "🥇 Gold Service",
+        "silver": "🥈 Silver Service",
+        "trial_choose": "🎁 Choose your free trial:",
         "custom": "✏️ Custom Volume",
         "custom_prompt": "✏️ Enter the desired volume in GB.\n\n💰 Price per GB: {price:,} Toman",
         "invalid_gb": "❌ Volume must be a whole number greater than zero.",
@@ -145,13 +153,14 @@ def tr(uid, key, **kwargs):
 
 
 def menu(uid):
+    # Telegram supports colored reply-keyboard buttons on recent clients.
     return ReplyKeyboardMarkup(
         [
-            [tr(uid, "buy")],
-            [tr(uid, "trial"), tr(uid, "wallet")],
-            [tr(uid, "refs"), tr(uid, "orders")],
-            [tr(uid, "support"), tr(uid, "settings")],
-            [tr(uid, "guide")],
+            [KeyboardButton(tr(uid, "buy"), style="primary")],
+            [KeyboardButton(tr(uid, "trial"), style="success"), KeyboardButton(tr(uid, "wallet"), style="primary")],
+            [KeyboardButton(tr(uid, "refs")), KeyboardButton(tr(uid, "orders"))],
+            [KeyboardButton(tr(uid, "support")), KeyboardButton(tr(uid, "settings"))],
+            [KeyboardButton(tr(uid, "guide"))],
         ],
         resize_keyboard=True,
     )
@@ -165,9 +174,10 @@ def force_keyboard(uid):
                 InlineKeyboardButton(
                     TEXT[l]["join"],
                     url=f"https://t.me/{REQUIRED_CHANNEL.lstrip('@')}",
+                    style="primary",
                 )
             ],
-            [InlineKeyboardButton(TEXT[l]["check"], callback_data="check")],
+            [InlineKeyboardButton(TEXT[l]["check"], callback_data="check", style="success")],
         ]
     )
 
@@ -347,8 +357,8 @@ async def settings(update, context):
     other = "English" if l == "fa" else "فارسی"
     keyboard = InlineKeyboardMarkup(
         [
-            [InlineKeyboardButton(f"🌐 {other}", callback_data="toggle_lang")],
-            [InlineKeyboardButton(tr(uid, "back"), callback_data="back_menu")],
+            [InlineKeyboardButton(f"🌐 {other}", callback_data="toggle_lang", style="primary")],
+            [InlineKeyboardButton(tr(uid, "back"), callback_data="back_menu", style="danger")],
         ]
     )
     await update.message.reply_text(tr(uid, "settings_text"), reply_markup=keyboard)
@@ -383,8 +393,8 @@ async def wallet(update, context):
     uid = update.effective_user.id
     keyboard = InlineKeyboardMarkup(
         [
-            [InlineKeyboardButton(tr(uid, "deposit"), callback_data="deposit")],
-            [InlineKeyboardButton(tr(uid, "coupon"), callback_data="coupon")],
+            [InlineKeyboardButton(tr(uid, "deposit"), callback_data="deposit", style="success")],
+            [InlineKeyboardButton(tr(uid, "coupon"), callback_data="coupon", style="primary")],
         ]
     )
     u = db.get_user(uid)
@@ -448,8 +458,8 @@ async def deposit_receipt(update, context):
 
     buttons = InlineKeyboardMarkup(
         [[
-            InlineKeyboardButton("✅ تأیید / Approve", callback_data=f"dep:1:{rid}"),
-            InlineKeyboardButton("❌ رد / Reject", callback_data=f"dep:0:{rid}"),
+            InlineKeyboardButton("✅ تأیید / Approve", callback_data=f"dep:1:{rid}", style="success"),
+            InlineKeyboardButton("❌ رد / Reject", callback_data=f"dep:0:{rid}", style="danger"),
         ]]
     )
 
@@ -477,27 +487,32 @@ async def deposit_receipt(update, context):
 async def shop(update, context):
     if not await gate(update, context):
         return
-
     uid = update.effective_user.id
     l = lang(uid)
-    rows = []
-
-    for p in db.plans():
-        title = p["title_fa"] if l == "fa" else p["title_en"]
-        price = "نامحدود" if p["unlimited"] else f"{p['price']:,} تومان"
-        rows.append([
-            InlineKeyboardButton(
-                f"{title} — {price}",
-                callback_data=f"buy:{p['id']}",
-            )
-        ])
-
-    rows.append([
-        InlineKeyboardButton(tr(uid, "custom"), callback_data="custom")
+    keyboard = InlineKeyboardMarkup([
+        [InlineKeyboardButton(TEXT[l]["gold"], callback_data="shop_service:gold", style="success")],
+        [InlineKeyboardButton(TEXT[l]["silver"], callback_data="shop_service:silver", style="primary")],
     ])
+    await update.message.reply_text(tr(uid, "choose_service"), reply_markup=keyboard)
 
-    await update.message.reply_text(
-        tr(uid, "plans"),
+
+async def shop_service(update, context):
+    q = update.callback_query
+    await q.answer()
+    uid = q.from_user.id
+    service = q.data.split(":", 1)[1]
+    rows = []
+    for p in db.plans(service=service):
+        title = p["title_fa"] if lang(uid) == "fa" else p["title_en"]
+        price = "نامحدود" if p["unlimited"] else f"{p['price']:,} تومان"
+        rows.append([InlineKeyboardButton(
+            f"{title} — {price}",
+            callback_data=f"buy:{service}:{p['id']}",
+            style="success" if service == "gold" else "primary",
+        )])
+    rows.append([InlineKeyboardButton(tr(uid, "custom"), callback_data=f"custom:{service}", style="primary")])
+    await q.message.reply_text(
+        f"{TEXT[lang(uid)][service]}\n\n{tr(uid, 'plans')}",
         reply_markup=InlineKeyboardMarkup(rows),
     )
 
@@ -515,14 +530,18 @@ async def buy(update, context):
     await query.answer()
     uid = query.from_user.id
 
+    parts = query.data.split(":")
     try:
-        pid = int(query.data.split(":")[1])
+        if len(parts) == 3:
+            service, pid = parts[1], int(parts[2])
+        else:
+            service, pid = "gold", int(parts[1])
     except (ValueError, IndexError):
         await query.message.reply_text("❌ سرویس نامعتبر است.")
         return
 
     p = db.get_plan(pid)
-    if not p or not p["active"]:
+    if not p or not p["active"] or p["service"] != service:
         await query.message.reply_text("❌ این سرویس در دسترس نیست.")
         return
 
@@ -584,16 +603,19 @@ async def buy(update, context):
         "original_price": original_price,
         "price": final_price,
         "title": title,
+        "service": service,
     }
 
     keyboard = InlineKeyboardMarkup([
         [InlineKeyboardButton(
             confirm_text,
-            callback_data=f"confirm_buy:{p['id']}"
+            callback_data=f"confirm_buy:{service}:{p['id']}",
+            style="success"
         )],
         [InlineKeyboardButton(
             cancel_text,
-            callback_data="cancel_buy"
+            callback_data="cancel_buy",
+            style="danger"
         )],
     ])
 
@@ -606,12 +628,11 @@ async def buy(update, context):
 async def custom_start(update, context):
     query = update.callback_query
     await query.answer()
+    service = query.data.split(":", 1)[1] if ":" in query.data else "gold"
+    context.user_data["custom_service"] = service
+    price_per_gb = GOLD_PRICE_PER_GB if service == "gold" else SILVER_PRICE_PER_GB
     await query.message.reply_text(
-        tr(
-            query.from_user.id,
-            "custom_prompt",
-            price=CUSTOM_PRICE_PER_GB,
-        )
+        tr(query.from_user.id, "custom_prompt", price=price_per_gb)
     )
     return CUSTOM_GB
 
@@ -629,7 +650,9 @@ async def custom_gb(update, context):
         await update.message.reply_text(tr(uid, "invalid_gb"))
         return CUSTOM_GB
 
-    original_price = gb * CUSTOM_PRICE_PER_GB
+    service = context.user_data.get("custom_service", "gold")
+    price_per_gb = GOLD_PRICE_PER_GB if service == "gold" else SILVER_PRICE_PER_GB
+    original_price = gb * price_per_gb
     coupon = context.user_data.get("coupon")
     final_price = apply_discount(original_price, coupon)
 
@@ -685,11 +708,12 @@ async def custom_gb(update, context):
         "original_price": original_price,
         "price": final_price,
         "title": f"{gb} GB",
+        "service": service,
     }
 
     keyboard = InlineKeyboardMarkup([
-        [InlineKeyboardButton(confirm_text, callback_data="confirm_custom")],
-        [InlineKeyboardButton(cancel_text, callback_data="cancel_buy")],
+        [InlineKeyboardButton(confirm_text, callback_data="confirm_custom", style="success")],
+        [InlineKeyboardButton(cancel_text, callback_data="cancel_buy", style="danger")],
     ])
 
     await update.message.reply_text(
@@ -842,6 +866,7 @@ async def _complete_pending_purchase(update, context):
     gb = pending["gb"]
     unlimited = bool(pending["unlimited"])
     plan_id = pending["plan_id"]
+    service = pending.get("service", "gold")
 
     if u["balance"] < price:
         await query.message.reply_text(
@@ -850,7 +875,7 @@ async def _complete_pending_purchase(update, context):
         )
         return
 
-    oid = db.create_order(uid, plan_id, gb, price)
+    oid = db.create_order(uid, plan_id, gb, price, service)
     if not oid:
         await query.message.reply_text(
             tr(uid, "not_enough", balance=u["balance"], price=price),
@@ -859,7 +884,7 @@ async def _complete_pending_purchase(update, context):
         return
 
     username = f"alpha_{uid}_{oid}"
-    result = await create_customer(username, gb, unlimited)
+    result = await create_customer(username, gb, unlimited, service=service)
 
     if not result["ok"]:
         db.refund(oid, uid, price)
@@ -887,6 +912,7 @@ async def _complete_pending_purchase(update, context):
 
     # Only clear coupon after successful purchase.
     context.user_data.pop("pending_purchase", None)
+    context.user_data.pop("custom_service", None)
     context.user_data.pop("coupon", None)
     context.user_data.pop("coupon_code", None)
 
@@ -906,17 +932,19 @@ async def _complete_pending_purchase(update, context):
 
 async def confirm_buy(update, context):
     query = update.callback_query
+    parts = query.data.split(":")
     try:
-        pid = int(query.data.split(":")[1])
+        if len(parts) == 3:
+            service, pid = parts[1], int(parts[2])
+        else:
+            service, pid = "gold", int(parts[1])
     except (ValueError, IndexError):
         await query.answer("❌ سفارش نامعتبر است.", show_alert=True)
         return
-
     pending = context.user_data.get("pending_purchase")
-    if not pending or pending.get("plan_id") != pid:
+    if not pending or pending.get("plan_id") != pid or pending.get("service", "gold") != service:
         await query.answer("❌ سفارش پیدا نشد.", show_alert=True)
         return
-
     await _complete_pending_purchase(update, context)
 
 
@@ -1021,16 +1049,16 @@ async def admin_panel(update, context):
     keyboard = InlineKeyboardMarkup(
         [
             [
-                InlineKeyboardButton("💳 شارژهای در انتظار", callback_data="admin_deposits"),
-                InlineKeyboardButton("📊 آمار", callback_data="admin_stats"),
+                InlineKeyboardButton("💳 شارژهای در انتظار", callback_data="admin_deposits", style="success"),
+                InlineKeyboardButton("📊 آمار", callback_data="admin_stats", style="primary"),
             ],
             [
-                InlineKeyboardButton("📦 مدیریت پلن‌ها", callback_data="admin_plans"),
-                InlineKeyboardButton("🎟 کدهای تخفیف", callback_data="admin_coupons"),
+                InlineKeyboardButton("📦 مدیریت پلن‌ها", callback_data="admin_plans", style="primary"),
+                InlineKeyboardButton("🎟 کدهای تخفیف", callback_data="admin_coupons", style="primary"),
             ],
             [
-                InlineKeyboardButton("👥 کاربران", callback_data="admin_users"),
-                InlineKeyboardButton("➕ افزایش موجودی", callback_data="admin_balance"),
+                InlineKeyboardButton("👥 کاربران", callback_data="admin_users", style="primary"),
+                InlineKeyboardButton("➕ افزایش موجودی", callback_data="admin_balance", style="success"),
             ],
         ]
     )
@@ -1075,11 +1103,13 @@ async def admin_callback(update, context):
                 [[
                     InlineKeyboardButton(
                         "✅ تأیید",
-                        callback_data=f"dep:1:{d['id']}"
+                        callback_data=f"dep:1:{d['id']}",
+                        style="success"
                     ),
                     InlineKeyboardButton(
                         "❌ رد",
-                        callback_data=f"dep:0:{d['id']}"
+                        callback_data=f"dep:0:{d['id']}",
+                        style="danger"
                     ),
                 ]]
             )
@@ -1097,7 +1127,7 @@ async def admin_callback(update, context):
         for p in rows:
             state = "فعال" if p["active"] else "غیرفعال"
             price = f"{p['price']:,}" if not p["unlimited"] else "نامحدود"
-            text.append(f"#{p['id']} | {p['title_fa']} | {price} | {state}")
+            text.append(f"#{p['id']} | {p['service'].upper()} | {p['title_fa']} | {price} | {state}")
         text.append("\nبرای تغییر قیمت: /setprice ID PRICE")
         text.append("برای فعال/غیرفعال کردن: /toggleplan ID")
         await q.message.reply_text("\n".join(text))
@@ -1239,48 +1269,36 @@ async def add_coupon_cmd(update, context):
 
 
 async def free_trial(update, context):
+    if not await gate(update, context):
+        return
     uid = update.effective_user.id
+    l = lang(uid)
+    keyboard = InlineKeyboardMarkup([
+        [InlineKeyboardButton(TEXT[l]["gold"], callback_data="trial:gold", style="success")],
+        [InlineKeyboardButton(TEXT[l]["silver"], callback_data="trial:silver", style="primary")],
+    ])
+    await update.message.reply_text(tr(uid, "trial_choose"), reply_markup=keyboard)
 
-    if db.has_used_trial(uid):
-        await update.message.reply_text(
-            tr(uid, "trial_used"),
-            reply_markup=menu(uid),
-        )
+
+async def trial_service(update, context):
+    q = update.callback_query
+    await q.answer()
+    uid = q.from_user.id
+    service = q.data.split(":", 1)[1]
+    if db.has_used_trial(uid, service):
+        await q.message.reply_text(tr(uid, "trial_used"), reply_markup=menu(uid))
         return
-
-    username = f"trial_{uid}"
-
-    result = await create_customer(
-        username=username,
-        gb=0.2,
-        days=1,
-    )
-
+    username = f"{service}_trial_{uid}"
+    result = await create_customer(username=username, gb=0.2, days=1, service=service)
     if not result["ok"]:
-        await update.message.reply_text(
-            tr(uid, "trial_error"),
-            reply_markup=menu(uid),
-        )
+        await q.message.reply_text(tr(uid, "trial_error"), reply_markup=menu(uid))
         return
-
     data = result.get("data") or {}
+    config = (result.get("config") or data.get("config") or data.get("subscription") or
+              data.get("subscription_url") or data.get("link") or data.get("url") or "")
+    db.set_trial_used(uid, service)
+    await q.message.reply_text(tr(uid, "trial_success", config=config or "Panel API did not return connection details."), reply_markup=menu(uid))
 
-    config = (
-        result.get("config")
-        or data.get("config")
-        or data.get("subscription")
-        or data.get("subscription_url")
-        or data.get("link")
-        or data.get("url")
-        or ""
-    )
-
-    db.set_trial_used(uid)
-
-    await update.message.reply_text(
-        tr(uid, "trial_success", config=config),
-        reply_markup=menu(uid),
-    )
 
 def run_bot():
     import asyncio
@@ -1331,7 +1349,7 @@ def run_bot():
 
     custom_conv = ConversationHandler(
         entry_points=[
-            CallbackQueryHandler(custom_start, pattern=r"^custom$")
+            CallbackQueryHandler(custom_start, pattern=r"^custom:(gold|silver)$")
         ],
         states={
             CUSTOM_GB: [
@@ -1351,10 +1369,6 @@ def run_bot():
         ],
         states={
             COUPON_INPUT: [
-                MessageHandler(
-                    filters.Regex(r"^(🎁 تست رایگان|🎁 Free Trial)$"),
-                    free_trial,
-                ),
                 MessageHandler(
                     filters.TEXT
                     & ~filters.COMMAND
@@ -1424,6 +1438,9 @@ def run_bot():
             pattern=r"^buy:",
         )
     )
+
+    app.add_handler(CallbackQueryHandler(shop_service, pattern=r"^shop_service:(gold|silver)$"))
+    app.add_handler(CallbackQueryHandler(trial_service, pattern=r"^trial:(gold|silver)$"))
 
     app.add_handler(
         CallbackQueryHandler(

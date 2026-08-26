@@ -35,6 +35,20 @@ PANEL_PASSWORD = os.getenv("PANEL_PASSWORD", "").strip()
 PANEL_API_TOKEN = os.getenv("PANEL_API_TOKEN", "").strip()
 
 # ==========================
+# Dual service panels
+# ==========================
+GOLD_PANEL_URL = os.getenv("GOLD_PANEL_URL", PANEL_URL).rstrip("/")
+GOLD_PANEL_USERNAME = os.getenv("GOLD_PANEL_USERNAME", PANEL_USERNAME).strip()
+GOLD_PANEL_PASSWORD = os.getenv("GOLD_PANEL_PASSWORD", PANEL_PASSWORD).strip()
+
+SILVER_PANEL_URL = os.getenv("SILVER_PANEL_URL", "").rstrip("/")
+SILVER_PANEL_USERNAME = os.getenv("SILVER_PANEL_USERNAME", "").strip()
+SILVER_PANEL_PASSWORD = os.getenv("SILVER_PANEL_PASSWORD", "").strip()
+
+GOLD_PRICE_PER_GB = int(os.getenv("GOLD_PRICE_PER_GB", "4000"))
+SILVER_PRICE_PER_GB = int(os.getenv("SILVER_PRICE_PER_GB", "2000"))
+
+# ==========================
 # Free Test
 # ==========================
 
