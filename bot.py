@@ -898,10 +898,12 @@ async def _complete_pending_purchase(update, context):
     data = result.get("data") or {}
 
     config = (
-        result.get("config")
-        or data.get("config")
-        or data.get("subscription")
+        result.get("connection_details")
+        or result.get("subscription_ur1")
+        or result.get("config")
         or data.get("subscription_url")
+        or data.get("subscriptionUr1")
+        or data.get("config")
         or data.get("link")
         or data.get("url")
         or ""
@@ -1294,8 +1296,17 @@ async def trial_service(update, context):
         await q.message.reply_text(tr(uid, "trial_error"), reply_markup=menu(uid))
         return
     data = result.get("data") or {}
-    config = (result.get("config") or data.get("config") or data.get("subscription") or
-              data.get("subscription_url") or data.get("link") or data.get("url") or "")
+    config = (
+        result.get("connection_details")
+        or result.get("subscription_url")
+        or result.get("config")
+        or data.get("subscription_url")
+        or data.get("subscriptionUrl")
+        or data.get("config")
+        or data.get("link")
+        or data.get("url")
+        or ""
+    )
     db.set_trial_used(uid, service)
     await q.message.reply_text(tr(uid, "trial_success", config=config or "Panel API did not return connection details."), reply_markup=menu(uid))
 
