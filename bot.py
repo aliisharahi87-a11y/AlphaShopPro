@@ -1,7 +1,7 @@
 import asyncio
 
 from database import has_used_trial, set_trial_used
-from telegram import Update, InlineKeyboardButton, InlineKeyboardMarkup, ReplyKeyboardMarkup, KeyboardButton
+from telegram import Bot, Message, Update, InlineKeyboardButton, InlineKeyboardMarkup, ReplyKeyboardMarkup, KeyboardButton, MessageEntity
 from telegram.ext import (
     Application,
     CallbackQueryHandler,
@@ -141,6 +141,160 @@ TEXT = {
         "trial_error": "❌ Failed to create free trial.",
     },
 }
+
+
+# ایموجی‌های عادیِ رابط در زمان ارسال به ایموجی‌های پریمیوم تبدیل می‌شوند.
+# متن اصلی هر ایموجی حفظ می‌شود تا در کلاینت‌های ناسازگار به‌عنوان fallback نمایش داده شود.
+PREMIUM_EMOJI_IDS = {
+    "🌹": "5440911110838425969", "❤️": "5449505950283078474", "🔐": "5472308992514464048",
+    "📣": "5469903029144657419", "✅": "5427009714745517609", "🛒": "5431499171045581032",
+    "🎁": "5199749070830197566", "💰": "5375296873982604963", "👥": "5372926953978341366",
+    "🛍": "5373052667671093676", "📞": "5467539229468793355", "🧰": "5449428597922079323",
+    "📚": "5373098009640836781", "🌍": "5399898266265475100", "👈": "5469735272017043817",
+    "➕": "5226945370684140473", "🎟": "5377599075237502153", "❌": "5465665476971471368",
+    "🖼": "5375074927252621134", "🔗": "5375129357373165375", "🥇": "5280735858926822987",
+    "🥈": "5283195573812340110", "✏️": "5334673106202010226", "🎉": "5436040291507247633",
+    "📝": "5334882760735598374", "👤": "5373012449597335010", "❗️": "5467928559664242360",
+    "🪪": "5422683699130933153", "💡": "5472146462362048818", "📆": "5431897022456145283",
+    "🙏": "5472189549473963781", "💸": "5472030678633684592", "⏳": "5451732530048802485",
+    "🏠": "5465226866321268133", "🔄": "5264727218734524899", "📊": "5431577498364158238",
+    "📈": "5373001317042101552", "🚀": "5445284980978621387", "🇮🇷": "5271878966347601947",
+    "🇬🇧": "5202196682497859879",
+}
+
+# نمادهایی که در نگاشت عمومی ایموجی‌های پریمیوم موجود نیستند، با نماد پریمیوم هم‌معنا جایگزین می‌شوند.
+PREMIUM_EMOJI_REPLACEMENTS = {
+    "🎟️": "🎟", "🔒": "🔐", "📢": "📣", "📦": "🛍", "⚙️": "🧰", "🌐": "🌍",
+    "🔙": "👈", "💳": "💰", "📸": "🖼", "🔌": "🔗", "🧾": "📝", "⚠️": "❗️",
+    "🆔": "🪪", "⛔": "❌", "📅": "📆", "🛠": "🧰",
+}
+
+PREMIUM_NUMBER_REPLACEMENTS = {
+    "1️⃣": "1.", "2️⃣": "2.", "3️⃣": "3.", "4️⃣": "4.", "5️⃣": "5.", "6️⃣": "6.", "7️⃣": "7.",
+}
+
+_PREMIUM_EMOJI_PATTERN = __import__("re").compile(
+    "|".join(__import__("re").escape(emoji) for emoji in sorted(PREMIUM_EMOJI_IDS, key=len, reverse=True))
+)
+
+
+def _normalise_premium_emoji_text(text):
+<<<<<<< HEAD
+    if not isinstance(text, str):
+        return text
+    for ordinary, premium_fallback in PREMIUM_EMOJI_REPLACEMENTS.items():
+        text = text.replace(ordinary, premium_fallback)
+    for keycap, plain_number in PREMIUM_NUMBER_REPLACEMENTS.items():
+        text = text.replace(keycap, plain_number)
+=======
+    # متن fallback را هرگز حذف یا با نماد دیگری جایگزین نمی‌کنیم.
+>>>>>>> ed4595c (Update bot)
+    return text
+
+
+def _custom_emoji_entities(text):
+    entities = []
+    for match in _PREMIUM_EMOJI_PATTERN.finditer(text):
+        # Telegram Bot API offsets are UTF-16 code units, not Python code points.
+        offset = len(text[:match.start()].encode("utf-16-le")) // 2
+        length = len(match.group(0).encode("utf-16-le")) // 2
+        entities.append(
+            MessageEntity(
+                type="custom_emoji",
+                offset=offset,
+                length=length,
+                custom_emoji_id=PREMIUM_EMOJI_IDS[match.group(0)],
+            )
+        )
+    return entities
+
+
+def _premium_html(text):
+    text = _normalise_premium_emoji_text(text)
+    return _PREMIUM_EMOJI_PATTERN.sub(
+        lambda match: f'<tg-emoji emoji-id="{PREMIUM_EMOJI_IDS[match.group(0)]}">{match.group(0)}</tg-emoji>',
+        text,
+    )
+
+
+def _premium_button_text(text):
+<<<<<<< HEAD
+    text = _normalise_premium_emoji_text(text)
+    match = _PREMIUM_EMOJI_PATTERN.match(text)
+    if not match:
+        return text, None
+    return text[match.end():].lstrip(), PREMIUM_EMOJI_IDS[match.group(0)]
+=======
+    # متن اصلی دکمه حفظ می‌شود تا ایموجی آن ناپدید نشود.
+    return text, None
+>>>>>>> ed4595c (Update bot)
+
+
+# آیکن دکمه‌ها با Custom Emoji تلگرام نمایش داده می‌شود؛ متن دکمه بدون ایموجی نگه داشته می‌شود.
+_TelegramInlineKeyboardButton = InlineKeyboardButton
+_TelegramKeyboardButton = KeyboardButton
+
+
+def InlineKeyboardButton(text, *args, **kwargs):
+    text, icon_custom_emoji_id = _premium_button_text(text)
+    if icon_custom_emoji_id:
+        kwargs.setdefault("icon_custom_emoji_id", icon_custom_emoji_id)
+    return _TelegramInlineKeyboardButton(text, *args, **kwargs)
+
+
+def KeyboardButton(text, *args, **kwargs):
+    text, icon_custom_emoji_id = _premium_button_text(text)
+    if icon_custom_emoji_id:
+        kwargs.setdefault("icon_custom_emoji_id", icon_custom_emoji_id)
+    return _TelegramKeyboardButton(text, *args, **kwargs)
+
+
+# همهٔ پیام‌ها، ویرایش‌ها و کپشن‌های خروجی، بدون تغییر محتوا، به Custom Emoji مجهز می‌شوند.
+_TelegramMessageEditText = Message.edit_text
+_TelegramBotSendMessage = Bot.send_message
+_TelegramBotSendPhoto = Bot.send_photo
+
+
+async def _premium_edit_text(self, text, *args, **kwargs):
+    if kwargs.get("entities") is None:
+        if kwargs.get("parse_mode"):
+            text = _premium_html(text)
+        else:
+            text = _normalise_premium_emoji_text(text)
+            entities = _custom_emoji_entities(text)
+            if entities:
+                kwargs["entities"] = entities
+    return await _TelegramMessageEditText(self, text, *args, **kwargs)
+
+
+async def _premium_send_message(self, chat_id, text, *args, **kwargs):
+    if kwargs.get("entities") is None:
+        if kwargs.get("parse_mode"):
+            text = _premium_html(text)
+        else:
+            text = _normalise_premium_emoji_text(text)
+            entities = _custom_emoji_entities(text)
+            if entities:
+                kwargs["entities"] = entities
+    return await _TelegramBotSendMessage(self, chat_id, text, *args, **kwargs)
+
+
+async def _premium_send_photo(self, chat_id, photo, caption=None, *args, **kwargs):
+    if caption and kwargs.get("caption_entities") is None:
+        if kwargs.get("parse_mode"):
+            caption = _premium_html(caption)
+        else:
+            caption = _normalise_premium_emoji_text(caption)
+            caption_entities = _custom_emoji_entities(caption)
+            if caption_entities:
+                kwargs["caption_entities"] = caption_entities
+    return await _TelegramBotSendPhoto(self, chat_id, photo, caption, *args, **kwargs)
+
+
+Message.edit_text = _premium_edit_text
+Bot.send_message = _premium_send_message
+Bot.send_photo = _premium_send_photo
+
 
 
 def lang(uid):
@@ -758,18 +912,27 @@ async def coupon_input(update, context):
     code = update.message.text.strip().upper()
 
     menu_values = {
+<<<<<<< HEAD
+        "منوی اصلی", "فروشگاه", "کیف پول",
+        "حساب کاربری", "زیرمجموعه‌گیری", "پشتیبانی",
+        "تنظیمات", "راهنما", "خرید سرویس",
+        "سفارش‌های من", "تست رایگان",
+        "MAIN MENU", "SHOP", "WALLET",
+        "ACCOUNT", "REFERRALS", "SUPPORT",
+        "SETTINGS", "GUIDE", "BUY SERVICE",
+        "MY ORDERS", "FREE TRIAL",
+=======
         "🏠 منوی اصلی", "🛒 فروشگاه", "💰 کیف پول",
         "👤 حساب کاربری", "👥 زیرمجموعه‌گیری", "📞 پشتیبانی",
-        "⚙️ تنظیمات", "📚 راهنما", "🛒 خرید سرویس",
-        "📦 سفارش‌های من", "🎁 تست رایگان",
+        "⚙️ تنظیمات", "📚 راهنما", "🛒 خرید سرویس", "📦 سفارش‌های من", "🎁 تست رایگان",
         "🏠 MAIN MENU", "🛒 SHOP", "💰 WALLET",
         "👤 ACCOUNT", "👥 REFERRALS", "📞 SUPPORT",
-        "⚙️ SETTINGS", "📚 GUIDE", "🛒 BUY SERVICE",
-        "📦 MY ORDERS", "🎁 FREE TRIAL",
+        "⚙️ SETTINGS", "📚 GUIDE", "🛒 BUY SERVICE", "📦 MY ORDERS", "🎁 FREE TRIAL",
+>>>>>>> ed4595c (Update bot)
     }
 
     if code in menu_values:
-        if code in {"🎁 تست رایگان", "🎁 FREE TRIAL"}:
+        if code in {"تست رایگان", "FREE TRIAL"}:
             await free_trial(update, context)
             return ConversationHandler.END
 
@@ -1384,12 +1547,12 @@ def run_bot():
                     filters.TEXT
                     & ~filters.COMMAND
                     & ~filters.Regex(
-                        r"^(🏠 منوی اصلی|🛒 فروشگاه|💰 کیف پول|"
-                        r"👤 حساب کاربری|👥 زیرمجموعه‌گیری|📞 پشتیبانی|"
-                        r"⚙️ تنظیمات|📚 راهنما|🛒 خرید سرویس|📦 سفارش‌های من|"
-                        r"🏠 Main Menu|🛒 Shop|💰 Wallet|"
-                        r"👤 Account|👥 Referrals|📞 Support|"
-                        r"⚙️ Settings|📚 Guide|🛒 Buy Service|📦 My Orders)$"
+                        r"^(منوی اصلی|فروشگاه|کیف پول|"
+                        r"حساب کاربری|زیرمجموعه‌گیری|پشتیبانی|"
+                        r"تنظیمات|راهنما|خرید سرویس|سفارش‌های من|"
+                        r"Main Menu|Shop|Wallet|"
+                        r"Account|Referrals|Support|"
+                        r"Settings|Guide|Buy Service|My Orders)$"
                     ),
                     coupon_input,
                 ),
@@ -1470,56 +1633,56 @@ def run_bot():
     # Reply keyboard handlers
     app.add_handler(
         MessageHandler(
-            filters.Regex(r"^(🛒 خرید سرویس|🛒 Buy Service)$"),
+            filters.Regex(r"^(خرید سرویس|Buy Service)$"),
             shop,
         )
     )
 
     app.add_handler(
         MessageHandler(
-            filters.Regex(r"^(🎁 تست رایگان|🎁 Free Trial)$"),
+            filters.Regex(r"^(تست رایگان|Free Trial)$"),
             free_trial,
         )
     )
 
     app.add_handler(
         MessageHandler(
-            filters.Regex(r"^(💰 کیف پول|💰 Wallet)$"),
+            filters.Regex(r"^(کیف پول|Wallet)$"),
             wallet,
         )
     )
 
     app.add_handler(
         MessageHandler(
-            filters.Regex(r"^(👥 زیرمجموعه‌گیری|👥 Referrals)$"),
+            filters.Regex(r"^(زیرمجموعه‌گیری|Referrals)$"),
             referrals,
         )
     )
 
     app.add_handler(
         MessageHandler(
-            filters.Regex(r"^(📦 سفارش‌های من|📦 My Orders)$"),
+            filters.Regex(r"^(سفارش‌های من|My Orders)$"),
             orders,
         )
     )
 
     app.add_handler(
         MessageHandler(
-            filters.Regex(r"^(📞 پشتیبانی|📞 Support)$"),
+            filters.Regex(r"^(پشتیبانی|Support)$"),
             support,
         )
     )
 
     app.add_handler(
         MessageHandler(
-            filters.Regex(r"^(⚙️ تنظیمات|⚙️ Settings)$"),
+            filters.Regex(r"^(تنظیمات|Settings)$"),
             settings,
         )
     )
 
     app.add_handler(
         MessageHandler(
-            filters.Regex(r"^(📚 راهنما|📚 Guide)$"),
+            filters.Regex(r"^(راهنما|Guide)$"),
             guide,
         )
     )
