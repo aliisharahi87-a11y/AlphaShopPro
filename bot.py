@@ -179,16 +179,12 @@ _PREMIUM_EMOJI_PATTERN = __import__("re").compile(
 
 
 def _normalise_premium_emoji_text(text):
-<<<<<<< HEAD
     if not isinstance(text, str):
         return text
     for ordinary, premium_fallback in PREMIUM_EMOJI_REPLACEMENTS.items():
         text = text.replace(ordinary, premium_fallback)
     for keycap, plain_number in PREMIUM_NUMBER_REPLACEMENTS.items():
         text = text.replace(keycap, plain_number)
-=======
-    # متن fallback را هرگز حذف یا با نماد دیگری جایگزین نمی‌کنیم.
->>>>>>> ed4595c (Update bot)
     return text
 
 
@@ -218,16 +214,11 @@ def _premium_html(text):
 
 
 def _premium_button_text(text):
-<<<<<<< HEAD
     text = _normalise_premium_emoji_text(text)
     match = _PREMIUM_EMOJI_PATTERN.match(text)
     if not match:
         return text, None
     return text[match.end():].lstrip(), PREMIUM_EMOJI_IDS[match.group(0)]
-=======
-    # متن اصلی دکمه حفظ می‌شود تا ایموجی آن ناپدید نشود.
-    return text, None
->>>>>>> ed4595c (Update bot)
 
 
 # آیکن دکمه‌ها با Custom Emoji تلگرام نمایش داده می‌شود؛ متن دکمه بدون ایموجی نگه داشته می‌شود.
@@ -912,7 +903,6 @@ async def coupon_input(update, context):
     code = update.message.text.strip().upper()
 
     menu_values = {
-<<<<<<< HEAD
         "منوی اصلی", "فروشگاه", "کیف پول",
         "حساب کاربری", "زیرمجموعه‌گیری", "پشتیبانی",
         "تنظیمات", "راهنما", "خرید سرویس",
@@ -921,14 +911,6 @@ async def coupon_input(update, context):
         "ACCOUNT", "REFERRALS", "SUPPORT",
         "SETTINGS", "GUIDE", "BUY SERVICE",
         "MY ORDERS", "FREE TRIAL",
-=======
-        "🏠 منوی اصلی", "🛒 فروشگاه", "💰 کیف پول",
-        "👤 حساب کاربری", "👥 زیرمجموعه‌گیری", "📞 پشتیبانی",
-        "⚙️ تنظیمات", "📚 راهنما", "🛒 خرید سرویس", "📦 سفارش‌های من", "🎁 تست رایگان",
-        "🏠 MAIN MENU", "🛒 SHOP", "💰 WALLET",
-        "👤 ACCOUNT", "👥 REFERRALS", "📞 SUPPORT",
-        "⚙️ SETTINGS", "📚 GUIDE", "🛒 BUY SERVICE", "📦 MY ORDERS", "🎁 FREE TRIAL",
->>>>>>> ed4595c (Update bot)
     }
 
     if code in menu_values:
