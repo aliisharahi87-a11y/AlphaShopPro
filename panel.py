@@ -130,8 +130,8 @@ async def _login_marzban(session, panel_url):
     token = os.getenv('SILVER_PANEL_API_TOKEN', '').strip()
     if token:
         return token
-    user = os.getenv('SILVER_PANEL_USERNAME', globals().get('SILVER_PANEL_USERNAME', '')).strip()
-    password = os.getenv('SILVER_PANEL_PASSWORD', globals().get('SILVER_PANEL_PASSWORD', '')).strip()
+    user = os.getenv('SILVER_PANEL_USERNAME_NEW', os.getenv('SILVER_PANEL_USERNAME', globals().get('SILVER_PANEL_USERNAME', ''))).strip()
+    password = os.getenv('SILVER_PANEL_PASSWORD_NEW', os.getenv('SILVER_PANEL_PASSWORD', globals().get('SILVER_PANEL_PASSWORD', ''))).strip()
     if not user or not password:
         raise RuntimeError('Silver Marzban credentials are missing (SILVER_PANEL_USERNAME/PASSWORD)')
     async with session.post(
@@ -151,7 +151,7 @@ async def _login_marzban(session, panel_url):
 
 
 async def _create_marzban(session, username, gb, days):
-    panel_url = _clean_url(os.getenv('SILVER_PANEL_URL', 'https://pan.linkesubs.com'))
+    panel_url = _clean_url(os.getenv('SILVER_PANEL_URL_NEW', os.getenv('SILVER_PANEL_URL', 'https://pan.linkesubs.com')))
     token = await _login_marzban(session, panel_url)
     headers = {'Authorization': f'Bearer {token}', 'Accept':'application/json', 'Content-Type':'application/json'}
 
