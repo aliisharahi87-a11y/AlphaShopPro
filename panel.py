@@ -1,4 +1,5 @@
 import asyncio
+import os
 from datetime import datetime, timedelta
 
 import aiohttp
@@ -12,9 +13,6 @@ from config import (
     GOLD_PANEL_USERNAME,
     GOLD_PANEL_PASSWORD,
 
-    SILVER_PANEL_URL_NEW,
-    SILVER_PANEL_USERNAME_NEW,
-    SILVER_PANEL_PASSWORD_NEW,
 
     BRONZE_PANEL_URL,
     BRONZE_PANEL_USERNAME,
@@ -51,9 +49,20 @@ def _panel_config(service="gold"):
 
     if service == "silver":
         return (
-            _clean_panel_url(SILVER_PANEL_URL_NEW),
-            SILVER_PANEL_USERNAME_NEW,
-            SILVER_PANEL_PASSWORD_NEW,
+            _clean_panel_url(
+                os.getenv(
+                    "SILVER_PANEL_URL_NEW",
+                    os.getenv("SILVER_PANEL_URL", "")
+                )
+            ),
+            os.getenv(
+                "SILVER_PANEL_USERNAME_NEW",
+                os.getenv("SILVER_PANEL_USERNAME", "")
+            ),
+            os.getenv(
+                "SILVER_PANEL_PASSWORD_NEW",
+                os.getenv("SILVER_PANEL_PASSWORD", "")
+            ),
         )
 
     if service == "bronze":
