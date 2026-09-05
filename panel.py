@@ -1,543 +1,466 @@
+import asyncio
 import os
-import uuid
-import aiohttp
 from datetime import datetime, timedelta
+
+import aiohttp
 
 from config import (
     PANEL_URL,
     PANEL_USERNAME,
     PANEL_PASSWORD,
-
     GOLD_PANEL_URL,
     GOLD_PANEL_USERNAME,
     GOLD_PANEL_PASSWORD,
-
     SILVER_PANEL_URL,
     SILVER_PANEL_USERNAME,
     SILVER_PANEL_PASSWORD,
-
-    BRONZE_PANEL_URL,
-    BRONZE_PANEL_USERNAME,
-    BRONZE_PANEL_PASSWORD,
-
     DEFAULT_GROUP_ID,
     DEFAULT_HWID_LIMIT,
     DEFAULT_STATUS,
     SHADOWSOCKS_METHOD,
 )
 
+GB = 1024 * 1024 * 1024
+
 
 def _clean_panel_url(url: str) -> str:
+    """Return a clean panel base URL without dashboard/hash/query parts."""
     if not url:
         return ""
 
-    url = url.strip()
+    url = str(url).strip()
+    if not url:
+        return ""
 
-    # حذف مسیرهای dashboard و #/
-    if "/dashboard" in url:
-        url = url.split("/dashboard", 1)[0]
-
-    url = url.split("#", 1)[0]
+    # A common value is https://panel.example.com/dashboard/#/
+    for marker in ("/dashboard", "/login", "/#/", "#"):
+        pos = url.lower().find(marker.lower())
+        if pos > 0:
+            url = url[:pos]
+            break
 
     return url.rstrip("/")
 
 
 def _panel_config(service="gold"):
+    """Get URL/credentials for Gold, Silver or Bronze."""
     service = (service or "gold").lower()
 
-    # -------------------------
-    # SILVER - NEW PANEL
-    # -------------------------
     if service == "silver":
         return (
             _clean_panel_url(
-                os.getenv(
-                    "SILVER_PANEL_URL_NEW",
-                    SILVER_PANEL_URL or ""
-                )
+                os.getenv("SILVER_PANEL_URL_NEW", SILVER_PANEL_URL or "")
             ),
             os.getenv(
                 "SILVER_PANEL_USERNAME_NEW",
-                SILVER_PANEL_USERNAME or ""
-            ),
+                SILVER_PANEL_USERNAME or "",
+            ).strip(),
             os.getenv(
                 "SILVER_PANEL_PASSWORD_NEW",
-                SILVER_PANEL_PASSWORD or ""
-            ),
+                SILVER_PANEL_PASSWORD or "",
+            ).strip(),
         )
 
-    # -------------------------
-    # BRONZE - OLD SILVER PANEL
-    # -------------------------
     if service == "bronze":
         return (
             _clean_panel_url(
                 os.getenv(
                     "BRONZE_PANEL_URL",
-                    BRONZE_PANEL_URL or ""
+                    os.getenv("SILVER_PANEL_URL", ""),
                 )
             ),
             os.getenv(
                 "BRONZE_PANEL_USERNAME",
-                BRONZE_PANEL_USERNAME or ""
-            ),
+                os.getenv("SILVER_PANEL_USERNAME", ""),
+            ).strip(),
             os.getenv(
                 "BRONZE_PANEL_PASSWORD",
-                BRONZE_PANEL_PASSWORD or ""
-            ),
+                os.getenv("SILVER_PANEL_PASSWORD", ""),
+            ).strip(),
         )
 
-    # -------------------------
-    # GOLD
-    # -------------------------
     return (
-        _clean_panel_url(
-            GOLD_PANEL_URL or PANEL_URL or ""
-        ),
-        GOLD_PANEL_USERNAME or PANEL_USERNAME,
-        GOLD_PANEL_PASSWORD or PANEL_PASSWORD,
+        _clean_panel_url(GOLD_PANEL_URL or PANEL_URL or ""),
+        (GOLD_PANEL_USERNAME or PANEL_USERNAME or "").strip(),
+        (GOLD_PANEL_PASSWORD or PANEL_PASSWORD or "").strip(),
     )
+
+
+def _normalize_url(value, panel_url=""):
+    if not value:
+        return ""
+
+    value = str(value).strip()
+    if not value:
+        return ""
+
+    if value.startswith(("http://", "https://")):
+        return value
+
+    if value.startswith("//"):
+        return "https:" + value
+
+    if panel_url:
+        base = _clean_panel_url(panel_url)
+        if value.startswith("/"):
+            return base + value
+
+        # hostname/path without scheme
+        if "." in value.split("/")[0]:
+            return "https://" + value
+
+    return value
+
+
+def _walk_connection_values(obj, panel_url=""):
+    """Recursively collect URL-like connection/subscription values."""
+    found = []
+
+    if isinstance(obj, dict):
+        preferred_keys = (
+            "subscription_url",
+            "subscriptionUrl",
+            "subscription_uri",
+            "subscriptionUri",
+            "sub_url",
+            "subUrl",
+            "subscription_link",
+            "subscriptionLink",
+            "config_url",
+            "configUrl",
+            "connection_url",
+            "connectionUrl",
+            "link",
+            "url",
+        )
+
+        for key in preferred_keys:
+            value = obj.get(key)
+            if isinstance(value, str) and value.strip():
+                found.append(_normalize_url(value, panel_url))
+
+        # Common nested containers.
+        for key in (
+            "subscription",
+            "subscriptions",
+            "links",
+            "connection",
+            "connections",
+            "proxy_settings",
+            "proxySettings",
+            "data",
+            "result",
+            "user",
+        ):
+            if key in obj:
+                found.extend(_walk_connection_values(obj[key], panel_url))
+
+        # Also inspect unknown nested structures.
+        for key, value in obj.items():
+            if key in {
+                "subscription", "subscriptions", "links", "connection",
+                "connections", "proxy_settings", "proxySettings", "data",
+                "result", "user",
+            }:
+                continue
+            if isinstance(value, (dict, list)):
+                found.extend(_walk_connection_values(value, panel_url))
+
+    elif isinstance(obj, list):
+        for item in obj:
+            found.extend(_walk_connection_values(item, panel_url))
+
+    # Remove duplicates while preserving order.
+    result = []
+    seen = set()
+    for value in found:
+        if value and value not in seen:
+            seen.add(value)
+            result.append(value)
+    return result
+
+
+def _extract_connection(data, panel_url=""):
+    values = _walk_connection_values(data, panel_url)
+    return values[0] if values else ""
+
+
+def _extract_all_connections(data, panel_url=""):
+    return _walk_connection_values(data, panel_url)
+
+
+async def _read_json(response):
+    raw = await response.text()
+    try:
+        data = await response.json(content_type=None)
+    except Exception:
+        data = {"raw": raw}
+    return data
 
 
 async def _login(session, service="gold"):
     panel_url, username, password = _panel_config(service)
 
     if not panel_url:
-        raise RuntimeError(
-            f"Panel URL is empty for service={service}"
-        )
-
+        raise RuntimeError(f"{service.title()} panel URL is not configured")
     if not username or not password:
-        raise RuntimeError(
-            f"Panel credentials are empty for service={service}"
-        )
+        raise RuntimeError(f"{service.title()} panel credentials are not configured")
 
-    url = f"{panel_url}/api/admin/token"
-
-    data = {
+    payload = {
+        "grant_type": "password",
         "username": username,
         "password": password,
     }
 
-    async with session.post(
-        url,
-        data=data,
-        timeout=aiohttp.ClientTimeout(total=30),
-    ) as response:
+    print(f"🔐 LOGIN {service.upper()} -> {panel_url} | user={username}")
 
-        text = await response.text()
+    try:
+        async with session.post(
+            f"{panel_url}/api/admin/token",
+            data=payload,
+            headers={
+                "Content-Type": "application/x-www-form-urlencoded;charset=UTF-8",
+                "Accept": "application/json, */*",
+            },
+        ) as response:
+            data = await _read_json(response)
+            print(f"🔐 LOGIN {service.upper()} STATUS: {response.status}")
 
-        if response.status != 200:
-            raise RuntimeError(
-                f"Panel login failed [{service}] "
-                f"HTTP {response.status}: {text[:1000]}"
-            )
-
-        try:
-            result = await response.json()
-        except Exception:
-            raise RuntimeError(
-                f"Panel login returned invalid JSON [{service}]: "
-                f"{text[:1000]}"
-            )
-
-        token = result.get("access_token")
-
-        if not token:
-            raise RuntimeError(
-                f"Panel login succeeded but access_token is missing "
-                f"[{service}]"
-            )
-
-        return token
-
-
-async def _get_inbounds(session, panel_url, token):
-    url = f"{panel_url}/api/inbounds"
-
-    headers = {
-        "accept": "application/json",
-        "Authorization": f"Bearer {token}",
-    }
-
-    async with session.get(
-        url,
-        headers=headers,
-        timeout=aiohttp.ClientTimeout(total=30),
-    ) as response:
-
-        text = await response.text()
-
-        if response.status != 200:
-            raise RuntimeError(
-                f"Get inbounds failed HTTP {response.status}: "
-                f"{text[:1000]}"
-            )
-
-        try:
-            return await response.json()
-        except Exception:
-            raise RuntimeError(
-                f"Invalid inbounds JSON: {text[:1000]}"
-            )
-
-
-def _build_marzban_inbounds(inbounds_data):
-    """
-    تبدیل پاسخ /api/inbounds به ساختار مورد نیاز Marzban:
-    {
-        "vless": ["tag1", "tag2"],
-        "vmess": ["tag3"],
-        ...
-    }
-    """
-
-    result = {}
-
-    if not isinstance(inbounds_data, dict):
-        return result
-
-    # حالت رایج:
-    # {
-    #   "vless": [...],
-    #   "vmess": [...],
-    #   ...
-    # }
-    for protocol in (
-        "vless",
-        "vmess",
-        "trojan",
-        "shadowsocks",
-        "wireguard",
-        "hysteria",
-        "hysteria2",
-    ):
-        items = inbounds_data.get(protocol)
-
-        if not isinstance(items, list):
-            continue
-
-        tags = []
-
-        for item in items:
-            if isinstance(item, str):
-                tags.append(item)
-                continue
-
-            if isinstance(item, dict):
-                tag = (
-                    item.get("tag")
-                    or item.get("remark")
-                    or item.get("name")
+            if response.status != 200:
+                print(f"❌ LOGIN {service.upper()} ERROR: {data}")
+                raise RuntimeError(
+                    f"Login Error ({service}) HTTP {response.status}: {data}"
                 )
 
-                if tag:
-                    tags.append(tag)
+            token = data.get("access_token") if isinstance(data, dict) else None
+            if not token and isinstance(data, dict):
+                token = data.get("token")
 
-        if tags:
-            result[protocol] = tags
+            if not token:
+                raise RuntimeError(
+                    f"Login response has no token ({service}): {data}"
+                )
 
-    return result
+            print(f"✅ LOGIN {service.upper()} SUCCESS")
+            return token, panel_url
 
-
-def _build_proxies(inbounds):
-    """
-    برای هر پروتکلی که inbound فعال دارد،
-    proxy خالی می‌سازیم تا Marzban UUID/تنظیمات لازم را تولید کند.
-    """
-
-    proxies = {}
-
-    for protocol in inbounds.keys():
-
-        if protocol in (
-            "vless",
-            "vmess",
-            "trojan",
-            "shadowsocks",
-            "wireguard",
-            "hysteria",
-            "hysteria2",
-        ):
-            proxies[protocol] = {}
-
-    # اگر VLESS فعال باشد، flow استاندارد Reality را اضافه می‌کنیم
-    if "vless" in proxies:
-        proxies["vless"]["flow"] = "xtls-rprx-vision"
-
-    return proxies
+    except asyncio.TimeoutError:
+        raise RuntimeError(f"{service.title()} panel login timeout")
+    except aiohttp.ClientError as exc:
+        raise RuntimeError(f"{service.title()} panel network error: {exc}")
 
 
-def _extract_subscription_url(data):
-    if not isinstance(data, dict):
-        return None
+async def _get_created_user(session, panel_url, headers, username):
+    """Fetch the user after creation when the POST response is incomplete."""
+    urls = (
+        f"{panel_url}/api/user/by-username/{username}",
+        f"{panel_url}/api/user/{username}",
+    )
 
-    # نام‌های رایج در نسخه‌های مختلف
-    for key in (
-        "subscription_url",
-        "subscriptionUrl",
-        "sub_url",
-        "subscription",
-    ):
-        value = data.get(key)
+    for url in urls:
+        try:
+            async with session.get(url, headers=headers) as response:
+                data = await _read_json(response)
+                print(f"🔎 GET USER STATUS: {response.status} -> {url}")
+                if response.status == 200 and isinstance(data, dict):
+                    return data
+        except (aiohttp.ClientError, asyncio.TimeoutError) as exc:
+            print(f"⚠️ GET USER FAILED: {url} -> {exc!r}")
 
-        if isinstance(value, str) and value.strip():
-            return value.strip()
+    return {}
 
-    # بعضی نسخه‌ها لینک را داخل links می‌دهند
-    links = data.get("links")
 
-    if isinstance(links, list) and links:
-        for link in links:
-            if isinstance(link, str) and link.startswith(("http://", "https://")):
-                return link
+async def _get_subscription_links(session, panel_url, headers, created_data, username):
+    """Pasargard/Marzban-compatible fallbacks for the actual subscription links."""
+    candidates = []
 
-    return None
+    user_id = None
+    if isinstance(created_data, dict):
+        user_id = (
+            created_data.get("id")
+            or created_data.get("user_id")
+            or created_data.get("userId")
+        )
+        nested = created_data.get("data")
+        if isinstance(nested, dict):
+            user_id = user_id or nested.get("id") or nested.get("user_id")
+
+    # Pasargard installations may expose subscription links by numeric user id.
+    if user_id is not None:
+        candidates.append(f"{panel_url}/api/user/{user_id}/subscription/links")
+
+    # Some versions expose the same endpoint by username.
+    candidates.append(f"{panel_url}/api/user/{username}/subscription/links")
+
+    for url in candidates:
+        try:
+            async with session.get(url, headers=headers) as response:
+                data = await _read_json(response)
+                print(f"🔗 SUB LINKS STATUS: {response.status} -> {url}")
+                if response.status == 200:
+                    links = _extract_all_connections(data, panel_url)
+                    if links:
+                        return links
+        except (aiohttp.ClientError, asyncio.TimeoutError) as exc:
+            print(f"⚠️ SUB LINKS FAILED: {url} -> {exc!r}")
+
+    return []
 
 
 async def create_customer(
     username,
-    data_limit_gb,
-    service="gold",
-    expire_days=30,
+    gb,
+    unlimited=False,
+    days=30,
+    group_ids=None,
     note="",
+    service="gold",
 ):
     """
-    ساخت کاربر در Gold / Silver / Bronze.
+    Create a user on the selected panel.
 
-    data_limit_gb:
-        حجم بر حسب GB
+    Gold   -> Pasargard
+    Silver -> Marzban
+    Bronze -> Pasargard
 
-    service:
-        gold
-        silver
-        bronze
+    The function keeps the legacy arguments used by bot.py so existing
+    purchase/trial handlers do not break.
     """
-
     service = (service or "gold").lower()
 
-    panel_url, panel_username, panel_password = _panel_config(service)
+    if group_ids is None:
+        group_ids = [DEFAULT_GROUP_ID]
 
-    if not panel_url:
-        raise RuntimeError(
-            f"Panel URL not configured for {service}"
-        )
-
-    if not panel_username or not panel_password:
-        raise RuntimeError(
-            f"Panel credentials not configured for {service}"
-        )
-
-    # نام کاربری فقط حروف/اعداد/_
-    safe_username = str(username)
-
-    allowed = (
-        "abcdefghijklmnopqrstuvwxyz"
-        "ABCDEFGHIJKLMNOPQRSTUVWXYZ"
-        "0123456789_"
+    timeout = aiohttp.ClientTimeout(
+        total=30,
+        connect=8,
+        sock_connect=8,
+        sock_read=18,
     )
+    connector = aiohttp.TCPConnector(limit=10, ttl_dns_cache=300)
 
-    safe_username = "".join(
-        c if c in allowed else "_"
-        for c in safe_username
-    )
+    async with aiohttp.ClientSession(timeout=timeout, connector=connector) as session:
+        try:
+            token, panel_url = await _login(session, service)
 
-    if len(safe_username) < 3:
-        safe_username = (
-            f"user_{safe_username}"
-        )
+            headers = {
+                "Authorization": f"Bearer {token}",
+                "Accept": "application/json",
+                "Content-Type": "application/json",
+            }
 
-    safe_username = safe_username[:32]
+            expire = (
+                datetime.now().astimezone() + timedelta(days=int(days))
+            ).isoformat(timespec="seconds")
 
-    # جلوگیری از username تکراری
-    safe_username = (
-        f"{safe_username}_{uuid.uuid4().hex[:6]}"
-    )
+            data_limit = 0 if unlimited else int(float(gb) * GB)
 
-    data_limit_bytes = int(
-        float(data_limit_gb) * 1024 * 1024 * 1024
-    )
+            # This is the API shape used by the Pasargard/Marzban frontend
+            # shipped with the project ZIP.
+            payload = {
+                "username": str(username).strip(),
+                "status": DEFAULT_STATUS or "active",
+                "data_limit": data_limit,
+                "expire": expire,
+                "group_ids": group_ids,
+                "hwid_limit": (
+                    None if DEFAULT_HWID_LIMIT == 0 else DEFAULT_HWID_LIMIT
+                ),
+                "next_plan": None,
+                "note": note or f"AlphaShop {service}",
+                "proxy_settings": {
+                    "shadowsocks": {
+                        "method": SHADOWSOCKS_METHOD,
+                    }
+                },
+            }
 
-    if expire_days:
-        expire = int(
-            (datetime.utcnow() + timedelta(days=expire_days)).timestamp()
-        )
-    else:
-        expire = 0
+            print(f"👤 CREATE {service.upper()} USER: {username}")
+            print(f"📦 CREATE {service.upper()} GB: {gb} UNLIMITED: {unlimited}")
 
-    async with aiohttp.ClientSession() as session:
+            async with session.post(
+                f"{panel_url}/api/user",
+                headers=headers,
+                json=payload,
+            ) as response:
+                data = await _read_json(response)
+                print(f"👤 CREATE {service.upper()} STATUS: {response.status}")
+                print(f"📥 CREATE {service.upper()} RESPONSE: {data}")
 
-        # -------------------------
-        # LOGIN
-        # -------------------------
-        token = await _login(
-            session,
-            service=service,
-        )
+                if response.status not in (200, 201):
+                    return {
+                        "ok": False,
+                        "data": data,
+                        "subscription_url": "",
+                        "connection_details": "",
+                        "config": "",
+                    }
 
-        headers = {
-            "accept": "application/json",
-            "Content-Type": "application/json",
-            "Authorization": f"Bearer {token}",
-        }
+            # 1) Try the creation response.
+            connection = _extract_connection(data, panel_url)
 
-        # -------------------------
-        # GET INBOUNDS
-        # -------------------------
-        inbounds_data = await _get_inbounds(
-            session,
-            panel_url,
-            token,
-        )
-
-        inbounds = _build_marzban_inbounds(
-            inbounds_data
-        )
-
-        if not inbounds:
-            raise RuntimeError(
-                f"No active inbounds found on {service} panel"
-            )
-
-        proxies = _build_proxies(inbounds)
-
-        if not proxies:
-            raise RuntimeError(
-                f"No supported protocols found on {service} panel"
-            )
-
-        # -------------------------
-        # CREATE USER
-        # -------------------------
-        payload = {
-            "username": safe_username,
-            "status": DEFAULT_STATUS or "active",
-            "expire": expire,
-            "data_limit": data_limit_bytes,
-            "data_limit_reset_strategy": "no_reset",
-            "proxies": proxies,
-            "inbounds": inbounds,
-            "note": note or f"AlphaShop {service}",
-        }
-
-        url = f"{panel_url}/api/user"
-
-        async with session.post(
-            url,
-            json=payload,
-            headers=headers,
-            timeout=aiohttp.ClientTimeout(total=45),
-        ) as response:
-
-            text = await response.text()
-
-            if response.status not in (200, 201):
-                raise RuntimeError(
-                    f"Create user failed [{service}] "
-                    f"HTTP {response.status}: {text[:2000]}"
+            # 2) Fetch the newly-created user. This fixes panels that return
+            # only {id, username, ...} from POST /api/user.
+            user_data = {}
+            if not connection:
+                user_data = await _get_created_user(
+                    session, panel_url, headers, str(username).strip()
                 )
+                connection = _extract_connection(user_data, panel_url)
 
-            try:
-                result = await response.json()
-            except Exception:
-                raise RuntimeError(
-                    f"Create user returned invalid JSON [{service}]: "
-                    f"{text[:2000]}"
+            # 3) Pasargard fallback: explicitly request subscription links.
+            links = []
+            if not connection:
+                links = await _get_subscription_links(
+                    session,
+                    panel_url,
+                    headers,
+                    data if isinstance(data, dict) else {},
+                    str(username).strip(),
                 )
+                if links:
+                    connection = links[0]
 
-        subscription_url = _extract_subscription_url(result)
+            merged = {}
+            if isinstance(data, dict):
+                merged.update(data)
+            if isinstance(user_data, dict):
+                merged.setdefault("user", user_data)
 
-        # DEBUG: ساختار پاسخ پنل بدون نمایش توکن/رمز
-        print(
-            f"[PANEL DEBUG] service={service} "
-            f"username={safe_username} "
-            f"response_keys={list(result.keys()) if isinstance(result, dict) else type(result).__name__}"
-        )
-        if isinstance(result, dict):
-            print(
-                f"[PANEL DEBUG] service={service} "
-                f"subscription_url={result.get('subscription_url')!r} "
-                f"subscriptionUrl={result.get('subscriptionUrl')!r} "
-                f"links_type={type(result.get('links')).__name__}"
+            final_username = (
+                (user_data.get("username") if isinstance(user_data, dict) else None)
+                or (data.get("username") if isinstance(data, dict) else None)
+                or str(username).strip()
             )
 
-        # -------------------------
-        # GET FULL USER DATA
-        # بعضی نسخه‌های Marzban لینک Subscription
-        # را در پاسخ POST /api/user نمی‌فرستند.
-        # -------------------------
-        if not subscription_url:
-            try:
-                user_url = f"{panel_url}/api/user/{safe_username}"
+            print(f"🔗 {service.upper()} CONNECTION: {connection or '<EMPTY>'}")
 
-                async with session.get(
-                    user_url,
-                    headers={
-                        "accept": "application/json",
-                        "Authorization": f"Bearer {token}",
-                    },
-                    timeout=aiohttp.ClientTimeout(total=30),
-                ) as user_response:
-
-                    user_text = await user_response.text()
-
-                    if user_response.status == 200:
-                        try:
-                            full_user = await user_response.json()
-
-                            found_url = _extract_subscription_url(full_user)
-
-                            if found_url:
-                                subscription_url = found_url
-
-                            # اطلاعات کامل‌تر را نگه می‌داریم
-                            if isinstance(full_user, dict):
-                                result = full_user
-
-                        except Exception:
-                            pass
-
-            except Exception:
-                pass
-
-        # -------------------------
-        # RETURN STANDARD RESULT
-        # -------------------------
-        final_username = result.get(
-            "username",
-            safe_username
-        )
-
-        # خروجی سازگار با bot.py قدیمی و جدید
-        return {
-            "ok": True,
-            "success": True,
-            "service": service,
-            "username": final_username,
-
-            "subscription_url": subscription_url,
-
-            # bot.py این کلیدها را هم بررسی می‌کند
-            "connection_details": subscription_url or "",
-            "config": subscription_url or "",
-
-            "links": result.get("links", []),
-
-            "data": {
+            return {
+                "ok": True,
+                "data": merged,
                 "username": final_username,
-                "subscription_url": subscription_url,
-                "subscriptionUrl": subscription_url,
-                "config": subscription_url,
-                "link": subscription_url,
-                "url": subscription_url,
-            },
+                "subscription_url": connection,
+                "connection_details": connection,
+                "config": connection,
+                "subscription_links": links,
+            }
 
-            "expire": result.get("expire", expire),
+        except asyncio.TimeoutError:
+            print(f"⏱️ CREATE {service.upper()} TIMEOUT")
+            return {
+                "ok": False,
+                "data": {"error": "Panel request timeout"},
+                "subscription_url": "",
+                "connection_details": "",
+                "config": "",
+            }
 
-            "data_limit": result.get(
-                "data_limit",
-                data_limit_bytes
-            ),
-
-            "raw": result,
-        }
+        except Exception as exc:
+            print(f"❌ CREATE {service.upper()} EXCEPTION: {exc!r}")
+            return {
+                "ok": False,
+                "data": {"error": str(exc)},
+                "subscription_url": "",
+                "connection_details": "",
+                "config": "",
+            }
