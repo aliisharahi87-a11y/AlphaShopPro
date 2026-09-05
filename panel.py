@@ -212,23 +212,27 @@ async def _create_marzban(session, token, panel_url, username, gb, unlimited, da
 
     wanted_name = str(SILVER_INBOUND_NAME or "").strip().lower()
     wanted_protocol = str(SILVER_PROTOCOL or "").strip().lower()
+    supported = {"vless", "vmess", "trojan", "shadowsocks"}
 
+    # Prefer the explicitly configured inbound/protocol, but never force a
+    # disabled protocol. Marzban rejects POST /api/user with HTTP 400 when
+    # the proxy type is not enabled in Xray. If the configured protocol is
+    # unavailable, automatically use the first protocol actually reported by
+    # /api/inbounds.
     selected = []
     if wanted_name and inbounds:
         selected = [x for x in inbounds if x[1].lower() == wanted_name]
-    if not selected and wanted_protocol and inbounds:
+    if not selected and wanted_protocol in supported and inbounds:
         selected = [x for x in inbounds if x[0] == wanted_protocol]
     if not selected and inbounds:
         selected = [inbounds[0]]
 
-    # If no inbound could be read, use the configured protocol and let
-    # Marzban apply the user to all inbounds of that protocol.
     if selected:
-        protocol = selected[0][0]
-        tags = [tag for proto, tag in selected if proto == protocol]
+        protocol = selected[0][0] if selected[0][0] in supported else "vless"
+        tags = [tag for proto, tag in selected if proto == protocol and tag]
         inbound_map = {protocol: tags} if tags else {}
     else:
-        protocol = wanted_protocol if wanted_protocol in {"vless", "vmess", "trojan", "shadowsocks"} else "vless"
+        protocol = wanted_protocol if wanted_protocol in supported else "vless"
         inbound_map = {}
 
     protocols = {protocol: _marzban_proxy(protocol)}
@@ -253,8 +257,29 @@ async def _create_marzban(session, token, panel_url, username, gb, unlimited, da
         session, "POST", f"{panel_url}/api/user", headers=headers, json=payload
     )
 
+    # If the configured protocol is disabled, try each protocol actually
+    # present in /api/inbounds. This is important for panels where the admin
+    # changed the active inbound from VLESS to VMess/Trojan/etc.
+    if status == 400 and inbounds:
+        tried = {protocol}
+        for candidate in [proto for proto, _tag in inbounds]:
+            if candidate not in supported or candidate in tried:
+                continue
+            tried.add(candidate)
+            candidate_tags = [tag for proto, tag in inbounds if proto == candidate and tag]
+            retry_payload = dict(payload)
+            retry_payload["proxies"] = {candidate: _marzban_proxy(candidate)}
+            retry_payload["inbounds"] = {candidate: candidate_tags} if candidate_tags else {}
+            print(f"🔁 MARZBAN RETRY -> protocol={candidate} inbounds={retry_payload['inbounds']}")
+            status, data, raw = await _request_json(
+                session, "POST", f"{panel_url}/api/user", headers=headers, json=retry_payload
+            )
+            if status in (200, 201, 409):
+                break
+
     # A 422 can happen when an installation has a different proxy/inbound
-    # combination. Retry with the protocol allowed on all matching inbounds.
+    # combination. Retry with empty inbounds so Marzban uses all inbounds for
+    # the selected protocol.
     if status == 422 and inbound_map:
         fallback = dict(payload)
         fallback["inbounds"] = {}
