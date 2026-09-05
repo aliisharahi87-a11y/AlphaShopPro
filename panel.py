@@ -447,6 +447,20 @@ async def create_customer(
 
         subscription_url = _extract_subscription_url(result)
 
+        # DEBUG: ساختار پاسخ پنل بدون نمایش توکن/رمز
+        print(
+            f"[PANEL DEBUG] service={service} "
+            f"username={safe_username} "
+            f"response_keys={list(result.keys()) if isinstance(result, dict) else type(result).__name__}"
+        )
+        if isinstance(result, dict):
+            print(
+                f"[PANEL DEBUG] service={service} "
+                f"subscription_url={result.get('subscription_url')!r} "
+                f"subscriptionUrl={result.get('subscriptionUrl')!r} "
+                f"links_type={type(result.get('links')).__name__}"
+            )
+
         # -------------------------
         # GET FULL USER DATA
         # بعضی نسخه‌های Marzban لینک Subscription
