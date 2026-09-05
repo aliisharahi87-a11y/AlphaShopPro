@@ -90,21 +90,25 @@ async def _login(session, service="gold"):
     panel_url, username, password = _panel_config(service)
     if not panel_url:
         raise RuntimeError(f"{service.title()} panel URL is not configured")
+
+    # Marzban can also be used with a pre-issued bearer token.
+    if service == "silver" and SILVER_PANEL_API_TOKEN:
+        return SILVER_PANEL_API_TOKEN.strip(), panel_url
+
     if not username or not password:
         raise RuntimeError(f"{service.title()} panel credentials are not configured")
 
-    status, data, _ = await _request_json(
+    status, data, raw = await _request_json(
         session, "POST", f"{panel_url}/api/admin/token",
         data={"grant_type": "password", "username": username, "password": password},
         headers={"Content-Type": "application/x-www-form-urlencoded", "Accept": "application/json"},
     )
     if status != 200:
-        raise RuntimeError(f"Login Error ({service}) HTTP {status}: {data}")
+        raise RuntimeError(f"Login Error ({service}) HTTP {status}: {data or raw}")
     token = data.get("access_token") if isinstance(data, dict) else None
     if not token:
-        raise RuntimeError(f"Login response has no access_token ({service}): {data}")
+        raise RuntimeError(f"Login response has no access_token ({service}): {data or raw}")
     return token, panel_url
-
 
 def _expire(days):
     return (datetime.now().astimezone() + timedelta(days=days)).isoformat(timespec="seconds")
@@ -184,67 +188,54 @@ def _marzban_proxy(protocol):
 
 
 async def _create_marzban(session, token, panel_url, username, gb, unlimited, days, note):
-    """Create a Marzban user using the actual enabled inbound protocols.
-
-    Marzban returns the generated subscription_url/links in the UserResponse.
-    We deliberately create the user from the inbound list instead of assuming
-    one fixed protocol, because different Marzban installations expose
-    different inbound protocols/tags.
-    """
     headers = {
         "Authorization": f"Bearer {token}",
         "Content-Type": "application/json",
         "Accept": "application/json",
     }
 
-    status, inbound_data, raw = await _request_json(
-        session, "GET", f"{panel_url}/api/inbounds", headers=headers
-    )
-    if status != 200:
-        raise RuntimeError(f"Marzban /api/inbounds failed HTTP {status}: {inbound_data or raw}")
-
-    inbounds = _parse_inbounds(inbound_data)
-    if not inbounds:
-        raise RuntimeError("Marzban returned no usable inbounds")
+    # /api/inbounds returns: {"vless": [{"tag": ..., ...}], "vmess": [...]}
+    # But an inbound list is optional in POST /api/user: an empty inbounds
+    # object means all inbounds for that protocol. Therefore failure to read
+    # /api/inbounds must not block account creation.
+    inbounds = []
+    try:
+        status, inbound_data, raw = await _request_json(
+            session, "GET", f"{panel_url}/api/inbounds", headers=headers
+        )
+        if status == 200:
+            inbounds = _parse_inbounds(inbound_data)
+        else:
+            print(f"⚠️ Marzban /api/inbounds HTTP {status}: {inbound_data or raw}")
+    except Exception as exc:
+        print("⚠️ Marzban /api/inbounds lookup failed:", repr(exc))
 
     wanted_name = str(SILVER_INBOUND_NAME or "").strip().lower()
     wanted_protocol = str(SILVER_PROTOCOL or "").strip().lower()
 
-    # Prefer an explicitly configured inbound tag.
     selected = []
-    if wanted_name:
+    if wanted_name and inbounds:
         selected = [x for x in inbounds if x[1].lower() == wanted_name]
-        if not selected:
-            # Trust an explicitly configured tag even if the endpoint response
-            # could not expose the tag in its normal shape.
-            selected = [(wanted_protocol or "vless", SILVER_INBOUND_NAME.strip())]
-    elif wanted_protocol:
+    if not selected and wanted_protocol and inbounds:
         selected = [x for x in inbounds if x[0] == wanted_protocol]
+    if not selected and inbounds:
+        selected = [inbounds[0]]
 
-    # If no exact match exists, use every available inbound. This makes the
-    # subscription useful on Marzban installations with multiple protocols.
-    if not selected:
-        selected = inbounds
+    # If no inbound could be read, use the configured protocol and let
+    # Marzban apply the user to all inbounds of that protocol.
+    if selected:
+        protocol = selected[0][0]
+        tags = [tag for proto, tag in selected if proto == protocol]
+        inbound_map = {protocol: tags} if tags else {}
+    else:
+        protocol = wanted_protocol if wanted_protocol in {"vless", "vmess", "trojan", "shadowsocks"} else "vless"
+        inbound_map = {}
 
-    protocols = {}
-    inbound_map = {}
-    for protocol, inbound_name in selected:
-        protocol = protocol.lower()
-        if protocol not in {"vless", "vmess", "trojan", "shadowsocks"}:
-            continue
-        if protocol in inbound_map:
-            inbound_map[protocol].append(inbound_name)
-        else:
-            inbound_map[protocol] = [inbound_name]
-        protocols[protocol] = _marzban_proxy(protocol)
-
-    if not protocols:
-        raise RuntimeError("Marzban returned no supported VLESS/VMess/Trojan/Shadowsocks inbound")
+    protocols = {protocol: _marzban_proxy(protocol)}
 
     expire = 0 if unlimited else int(
         (datetime.now().astimezone() + timedelta(days=days)).timestamp()
     )
-
     payload = {
         "username": username,
         "proxies": protocols,
@@ -256,11 +247,20 @@ async def _create_marzban(session, token, panel_url, username, gb, unlimited, da
         "note": note or "",
     }
 
-    print(f"🟣 MARZBAN CREATE -> user={username} inbounds={inbound_map}")
+    print(f"🟣 MARZBAN CREATE -> user={username} protocol={protocol} inbounds={inbound_map}")
 
     status, data, raw = await _request_json(
         session, "POST", f"{panel_url}/api/user", headers=headers, json=payload
     )
+
+    # A 422 can happen when an installation has a different proxy/inbound
+    # combination. Retry with the protocol allowed on all matching inbounds.
+    if status == 422 and inbound_map:
+        fallback = dict(payload)
+        fallback["inbounds"] = {}
+        status, data, raw = await _request_json(
+            session, "POST", f"{panel_url}/api/user", headers=headers, json=fallback
+        )
 
     if status == 409:
         recovered = await _get_subscription(session, token, panel_url, username)
@@ -271,14 +271,13 @@ async def _create_marzban(session, token, panel_url, username, gb, unlimited, da
     if status not in (200, 201):
         raise RuntimeError(f"Marzban create user failed HTTP {status}: {data or raw}")
 
-    # The POST response normally contains subscription_url and links.
-    # Immediately GET the user as a second source of truth.
-    verified = await _request_json(
+    # UserResponse officially contains subscription_url and links.
+    verified_status, verified_data, verified_raw = await _request_json(
         session, "GET", f"{panel_url}/api/user/{username}", headers=headers
     )
-    if verified[0] == 200 and isinstance(verified[1], dict):
+    if verified_status == 200 and isinstance(verified_data, dict):
         merged = dict(data) if isinstance(data, dict) else {}
-        merged.update(verified[1])
+        merged.update(verified_data)
         return merged
 
     return data
