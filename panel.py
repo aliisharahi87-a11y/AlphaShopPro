@@ -450,19 +450,41 @@ async def create_customer(
         # -------------------------
         # RETURN STANDARD RESULT
         # -------------------------
+        final_username = result.get(
+            "username",
+            safe_username
+        )
+
+        # خروجی سازگار با bot.py قدیمی و جدید
         return {
+            "ok": True,
             "success": True,
             "service": service,
-            "username": result.get(
-                "username",
-                safe_username
-            ),
+            "username": final_username,
+
             "subscription_url": subscription_url,
+
+            # bot.py این کلیدها را هم بررسی می‌کند
+            "connection_details": subscription_url or "",
+            "config": subscription_url or "",
+
             "links": result.get("links", []),
+
+            "data": {
+                "username": final_username,
+                "subscription_url": subscription_url,
+                "subscriptionUrl": subscription_url,
+                "config": subscription_url,
+                "link": subscription_url,
+                "url": subscription_url,
+            },
+
             "expire": result.get("expire", expire),
+
             "data_limit": result.get(
                 "data_limit",
                 data_limit_bytes
             ),
+
             "raw": result,
         }

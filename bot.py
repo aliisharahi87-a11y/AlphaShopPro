@@ -902,7 +902,7 @@ async def _complete_pending_purchase(update, context):
         return
 
     username = f"alpha_{uid}_{oid}"
-    result = await create_customer(username=username, gb=gb, unlimited=unlimited, service=service)
+    result = await create_customer(username=username, data_limit_gb=gb, service=service, expire_days=(30 if not unlimited else 3650))
 
     if not result["ok"]:
         db.refund(oid, uid, price)
@@ -1333,7 +1333,7 @@ async def trial_service(update, context):
         await q.message.reply_text(tr(uid, "trial_used"), reply_markup=menu(uid))
         return
     username = f"{service}_trial_{uid}"
-    result = await create_customer(username=username, gb=FREE_TRIAL_GB, days=1, service=service)
+    result = await create_customer(username=username, data_limit_gb=FREE_TRIAL_GB, service=service, expire_days=1)
     if not result["ok"]:
         await q.message.reply_text(tr(uid, "trial_error"), reply_markup=menu(uid))
         return
