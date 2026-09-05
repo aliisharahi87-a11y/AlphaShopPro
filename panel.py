@@ -13,6 +13,9 @@ from config import (
     SILVER_PANEL_URL,
     SILVER_PANEL_USERNAME,
     SILVER_PANEL_PASSWORD,
+    BRONZE_PANEL_URL,
+    BRONZE_PANEL_USERNAME,
+    BRONZE_PANEL_PASSWORD,
     DEFAULT_GROUP_ID,
     DEFAULT_HWID_LIMIT,
     DEFAULT_STATUS,
@@ -30,6 +33,9 @@ def _panel_config(service="gold"):
             SILVER_PANEL_URL,
             SILVER_PANEL_USERNAME,
             SILVER_PANEL_PASSWORD,
+    BRONZE_PANEL_URL,
+    BRONZE_PANEL_USERNAME,
+    BRONZE_PANEL_PASSWORD,
         )
 
     return (
