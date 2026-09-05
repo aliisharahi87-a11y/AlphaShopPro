@@ -13,6 +13,9 @@ from config import (
     SILVER_PANEL_URL,
     SILVER_PANEL_USERNAME,
     SILVER_PANEL_PASSWORD,
+    BRONZE_PANEL_URL,
+    BRONZE_PANEL_USERNAME,
+    BRONZE_PANEL_PASSWORD,
     DEFAULT_GROUP_ID,
     DEFAULT_HWID_LIMIT,
     DEFAULT_STATUS,
@@ -27,13 +30,20 @@ def _panel_config(service="gold"):
 
     if service == "silver":
         return (
-            SILVER_PANEL_URL,
+            SILVER_PANEL_URL.rstrip("/"),
             SILVER_PANEL_USERNAME,
             SILVER_PANEL_PASSWORD,
         )
 
+    if service == "bronze":
+        return (
+            BRONZE_PANEL_URL.rstrip("/"),
+            BRONZE_PANEL_USERNAME,
+            BRONZE_PANEL_PASSWORD,
+        )
+
     return (
-        GOLD_PANEL_URL or PANEL_URL,
+        (GOLD_PANEL_URL or PANEL_URL).rstrip("/"),
         GOLD_PANEL_USERNAME or PANEL_USERNAME,
         GOLD_PANEL_PASSWORD or PANEL_PASSWORD,
     )
