@@ -184,75 +184,102 @@ def _marzban_proxy(protocol):
 
 
 async def _create_marzban(session, token, panel_url, username, gb, unlimited, days, note):
+    """Create a Marzban user using the actual enabled inbound protocols.
+
+    Marzban returns the generated subscription_url/links in the UserResponse.
+    We deliberately create the user from the inbound list instead of assuming
+    one fixed protocol, because different Marzban installations expose
+    different inbound protocols/tags.
+    """
     headers = {
         "Authorization": f"Bearer {token}",
         "Content-Type": "application/json",
         "Accept": "application/json",
     }
 
-    # Read available inbounds. If this endpoint is unavailable on an older
-    # Marzban build, we can still use the explicitly configured inbound name.
-    inbounds = []
     status, inbound_data, raw = await _request_json(
         session, "GET", f"{panel_url}/api/inbounds", headers=headers
     )
-    if status == 200:
-        inbounds = _parse_inbounds(inbound_data)
-    else:
-        print(f"⚠️ Marzban /api/inbounds HTTP {status}: {inbound_data}")
+    if status != 200:
+        raise RuntimeError(f"Marzban /api/inbounds failed HTTP {status}: {inbound_data or raw}")
+
+    inbounds = _parse_inbounds(inbound_data)
+    if not inbounds:
+        raise RuntimeError("Marzban returned no usable inbounds")
 
     wanted_name = str(SILVER_INBOUND_NAME or "").strip().lower()
-    wanted_protocol = str(SILVER_PROTOCOL or "vless").strip().lower()
+    wanted_protocol = str(SILVER_PROTOCOL or "").strip().lower()
 
-    selected = None
+    # Prefer an explicitly configured inbound tag.
+    selected = []
     if wanted_name:
-        selected = next((x for x in inbounds if x[1].lower() == wanted_name), None)
+        selected = [x for x in inbounds if x[1].lower() == wanted_name]
         if not selected:
-            # If the admin explicitly configured an inbound tag, trust it even
-            # when /api/inbounds has a different response shape.
-            selected = (wanted_protocol, SILVER_INBOUND_NAME.strip())
-    if not selected:
-        selected = next((x for x in inbounds if x[0] == wanted_protocol), None)
-    if not selected and inbounds:
-        selected = inbounds[0]
-    if not selected:
-        raise RuntimeError(
-            "Marzban has no usable inbound. Set SILVER_INBOUND_NAME in .env "
-            "to the exact inbound tag shown in Marzban."
-        )
+            # Trust an explicitly configured tag even if the endpoint response
+            # could not expose the tag in its normal shape.
+            selected = [(wanted_protocol or "vless", SILVER_INBOUND_NAME.strip())]
+    elif wanted_protocol:
+        selected = [x for x in inbounds if x[0] == wanted_protocol]
 
-    protocol, inbound_name = selected
-    protocol = protocol.lower()
-    proxy = _marzban_proxy(protocol)
+    # If no exact match exists, use every available inbound. This makes the
+    # subscription useful on Marzban installations with multiple protocols.
+    if not selected:
+        selected = inbounds
+
+    protocols = {}
+    inbound_map = {}
+    for protocol, inbound_name in selected:
+        protocol = protocol.lower()
+        if protocol not in {"vless", "vmess", "trojan", "shadowsocks"}:
+            continue
+        if protocol in inbound_map:
+            inbound_map[protocol].append(inbound_name)
+        else:
+            inbound_map[protocol] = [inbound_name]
+        protocols[protocol] = _marzban_proxy(protocol)
+
+    if not protocols:
+        raise RuntimeError("Marzban returned no supported VLESS/VMess/Trojan/Shadowsocks inbound")
+
+    expire = 0 if unlimited else int(
+        (datetime.now().astimezone() + timedelta(days=days)).timestamp()
+    )
 
     payload = {
         "username": username,
-        "proxies": {protocol: proxy},
-        "inbounds": {protocol: [inbound_name]},
-        "expire": 0 if unlimited else int((datetime.now().astimezone() + timedelta(days=days)).timestamp()),
+        "proxies": protocols,
+        "inbounds": inbound_map,
+        "expire": expire,
         "data_limit": 0 if unlimited else int(float(gb) * GB),
         "data_limit_reset_strategy": "no_reset",
         "status": "active",
         "note": note or "",
     }
 
-    print(
-        f"🟣 MARZBAN CREATE -> user={username} protocol={protocol} inbound={inbound_name}"
-    )
+    print(f"🟣 MARZBAN CREATE -> user={username} inbounds={inbound_map}")
 
     status, data, raw = await _request_json(
         session, "POST", f"{panel_url}/api/user", headers=headers, json=payload
     )
 
     if status == 409:
-        # User may already have been created by a previous request. Recover it.
         recovered = await _get_subscription(session, token, panel_url, username)
         if recovered:
             return {"username": username, "subscription_url": recovered, "links": [recovered]}
-        raise RuntimeError(f"Marzban user already exists HTTP 409: {data}")
+        raise RuntimeError(f"Marzban user already exists HTTP 409: {data or raw}")
 
     if status not in (200, 201):
         raise RuntimeError(f"Marzban create user failed HTTP {status}: {data or raw}")
+
+    # The POST response normally contains subscription_url and links.
+    # Immediately GET the user as a second source of truth.
+    verified = await _request_json(
+        session, "GET", f"{panel_url}/api/user/{username}", headers=headers
+    )
+    if verified[0] == 200 and isinstance(verified[1], dict):
+        merged = dict(data) if isinstance(data, dict) else {}
+        merged.update(verified[1])
+        return merged
 
     return data
 
@@ -374,6 +401,14 @@ async def create_customer(username, gb, unlimited=False, days=30, group_ids=None
 
                 # Marzban path: always verify/retrieve subscription after creation.
                 connection = _extract_connection(data, panel_url)
+                if not connection:
+                    # Explicitly inspect the canonical UserResponse fields first.
+                    if isinstance(data, dict):
+                        connection = _normalize_url(data.get("subscription_url"), panel_url)
+                        if not connection:
+                            connection = _normalize_url(data.get("subscriptionUrl"), panel_url)
+                        if not connection:
+                            connection = _normalize_url(data.get("links"), panel_url)
                 if not connection:
                     connection = await _get_subscription(session, token, panel_url, username)
                 final_username = data.get("username", username) if isinstance(data, dict) else username
