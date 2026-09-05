@@ -1,8 +1,7 @@
-import asyncio
 import os
-from datetime import datetime, timedelta
-
+import uuid
 import aiohttp
+from datetime import datetime, timedelta
 
 from config import (
     PANEL_URL,
@@ -13,6 +12,9 @@ from config import (
     GOLD_PANEL_USERNAME,
     GOLD_PANEL_PASSWORD,
 
+    SILVER_PANEL_URL,
+    SILVER_PANEL_USERNAME,
+    SILVER_PANEL_PASSWORD,
 
     BRONZE_PANEL_URL,
     BRONZE_PANEL_USERNAME,
@@ -24,127 +26,77 @@ from config import (
     SHADOWSOCKS_METHOD,
 )
 
-GB = 1024 * 1024 * 1024
 
-
-def _clean_panel_url(url):
+def _clean_panel_url(url: str) -> str:
     if not url:
         return ""
 
-    url = str(url).strip().rstrip("/")
+    url = url.strip()
 
-    # حذف مسیر داشبورد از URL
-    for suffix in (
-        "/dashboard/#",
-        "/dashboard",
-    ):
-        if url.lower().endswith(suffix.lower()):
-            url = url[: -len(suffix)].rstrip("/")
+    # حذف مسیرهای dashboard و #/
+    if "/dashboard" in url:
+        url = url.split("/dashboard", 1)[0]
 
-    return url
+    url = url.split("#", 1)[0]
+
+    return url.rstrip("/")
 
 
 def _panel_config(service="gold"):
     service = (service or "gold").lower()
 
+    # -------------------------
+    # SILVER - NEW PANEL
+    # -------------------------
     if service == "silver":
         return (
             _clean_panel_url(
                 os.getenv(
                     "SILVER_PANEL_URL_NEW",
-                    os.getenv("SILVER_PANEL_URL", "")
+                    SILVER_PANEL_URL or ""
                 )
             ),
             os.getenv(
                 "SILVER_PANEL_USERNAME_NEW",
-                os.getenv("SILVER_PANEL_USERNAME", "")
+                SILVER_PANEL_USERNAME or ""
             ),
             os.getenv(
                 "SILVER_PANEL_PASSWORD_NEW",
-                os.getenv("SILVER_PANEL_PASSWORD", "")
+                SILVER_PANEL_PASSWORD or ""
             ),
         )
 
+    # -------------------------
+    # BRONZE - OLD SILVER PANEL
+    # -------------------------
     if service == "bronze":
         return (
-            _clean_panel_url(BRONZE_PANEL_URL),
-            BRONZE_PANEL_USERNAME,
-            BRONZE_PANEL_PASSWORD,
+            _clean_panel_url(
+                os.getenv(
+                    "BRONZE_PANEL_URL",
+                    BRONZE_PANEL_URL or ""
+                )
+            ),
+            os.getenv(
+                "BRONZE_PANEL_USERNAME",
+                BRONZE_PANEL_USERNAME or ""
+            ),
+            os.getenv(
+                "BRONZE_PANEL_PASSWORD",
+                BRONZE_PANEL_PASSWORD or ""
+            ),
         )
 
+    # -------------------------
+    # GOLD
+    # -------------------------
     return (
-        _clean_panel_url(GOLD_PANEL_URL or PANEL_URL),
+        _clean_panel_url(
+            GOLD_PANEL_URL or PANEL_URL or ""
+        ),
         GOLD_PANEL_USERNAME or PANEL_USERNAME,
         GOLD_PANEL_PASSWORD or PANEL_PASSWORD,
     )
-
-
-def _normalize_url(value, panel_url=""):
-    if not value:
-        return ""
-
-    value = str(value).strip()
-
-    if not value:
-        return ""
-
-    if value.startswith(("http://", "https://")):
-        return value
-
-    if value.startswith("//"):
-        return "https:" + value
-
-    if panel_url and value.startswith("/"):
-        return panel_url.rstrip("/") + value
-
-    if "." in value.split("/")[0]:
-        return "https://" + value
-
-    return value
-
-
-def _extract_connection(data, panel_url=""):
-    if not isinstance(data, dict):
-        return ""
-
-    candidates = [
-        data.get("subscription_url"),
-        data.get("subscriptionUrl"),
-        data.get("subscription"),
-        data.get("sub_url"),
-        data.get("subUrl"),
-        data.get("config"),
-        data.get("link"),
-        data.get("url"),
-    ]
-
-    subscription = data.get("subscription")
-
-    if isinstance(subscription, dict):
-        candidates.extend([
-            subscription.get("url"),
-            subscription.get("subscription_url"),
-            subscription.get("subscriptionUrl"),
-            subscription.get("link"),
-        ])
-
-    proxy_settings = data.get("proxy_settings")
-
-    if isinstance(proxy_settings, dict):
-        for value in proxy_settings.values():
-            if isinstance(value, dict):
-                candidates.extend([
-                    value.get("subscription_url"),
-                    value.get("subscriptionUrl"),
-                    value.get("url"),
-                    value.get("link"),
-                ])
-
-    for value in candidates:
-        if isinstance(value, str) and value.strip():
-            return _normalize_url(value, panel_url)
-
-    return ""
 
 
 async def _login(session, service="gold"):
@@ -152,242 +104,365 @@ async def _login(session, service="gold"):
 
     if not panel_url:
         raise RuntimeError(
-            f"{service.title()} panel URL is not configured"
+            f"Panel URL is empty for service={service}"
         )
 
     if not username or not password:
         raise RuntimeError(
-            f"{service.title()} panel credentials are not configured"
+            f"Panel credentials are empty for service={service}"
         )
 
+    url = f"{panel_url}/api/admin/token"
+
     data = {
-        "grant_type": "password",
         "username": username,
         "password": password,
     }
 
-    print(
-        f"🔐 LOGIN {service.upper()} -> "
-        f"{panel_url} | user={username}"
-    )
+    async with session.post(
+        url,
+        data=data,
+        timeout=aiohttp.ClientTimeout(total=30),
+    ) as response:
 
-    try:
-        async with session.post(
-            f"{panel_url}/api/admin/token",
-            data=data,
-            headers={
-                "Content-Type":
-                    "application/x-www-form-urlencoded",
-                "Accept": "application/json",
-            },
-        ) as r:
+        text = await response.text()
 
-            raw = await r.text()
-
-            try:
-                js = await r.json(content_type=None)
-            except Exception:
-                js = {"raw": raw}
-
-            print(
-                f"🔐 LOGIN {service.upper()} STATUS:",
-                r.status,
+        if response.status != 200:
+            raise RuntimeError(
+                f"Panel login failed [{service}] "
+                f"HTTP {response.status}: {text[:1000]}"
             )
 
-            if r.status != 200:
-                print(
-                    f"❌ LOGIN {service.upper()} ERROR:",
-                    js,
+        try:
+            result = await response.json()
+        except Exception:
+            raise RuntimeError(
+                f"Panel login returned invalid JSON [{service}]: "
+                f"{text[:1000]}"
+            )
+
+        token = result.get("access_token")
+
+        if not token:
+            raise RuntimeError(
+                f"Panel login succeeded but access_token is missing "
+                f"[{service}]"
+            )
+
+        return token
+
+
+async def _get_inbounds(session, panel_url, token):
+    url = f"{panel_url}/api/inbounds"
+
+    headers = {
+        "accept": "application/json",
+        "Authorization": f"Bearer {token}",
+    }
+
+    async with session.get(
+        url,
+        headers=headers,
+        timeout=aiohttp.ClientTimeout(total=30),
+    ) as response:
+
+        text = await response.text()
+
+        if response.status != 200:
+            raise RuntimeError(
+                f"Get inbounds failed HTTP {response.status}: "
+                f"{text[:1000]}"
+            )
+
+        try:
+            return await response.json()
+        except Exception:
+            raise RuntimeError(
+                f"Invalid inbounds JSON: {text[:1000]}"
+            )
+
+
+def _build_marzban_inbounds(inbounds_data):
+    """
+    تبدیل پاسخ /api/inbounds به ساختار مورد نیاز Marzban:
+    {
+        "vless": ["tag1", "tag2"],
+        "vmess": ["tag3"],
+        ...
+    }
+    """
+
+    result = {}
+
+    if not isinstance(inbounds_data, dict):
+        return result
+
+    # حالت رایج:
+    # {
+    #   "vless": [...],
+    #   "vmess": [...],
+    #   ...
+    # }
+    for protocol in (
+        "vless",
+        "vmess",
+        "trojan",
+        "shadowsocks",
+        "wireguard",
+        "hysteria",
+        "hysteria2",
+    ):
+        items = inbounds_data.get(protocol)
+
+        if not isinstance(items, list):
+            continue
+
+        tags = []
+
+        for item in items:
+            if isinstance(item, str):
+                tags.append(item)
+                continue
+
+            if isinstance(item, dict):
+                tag = (
+                    item.get("tag")
+                    or item.get("remark")
+                    or item.get("name")
                 )
-                raise RuntimeError(
-                    f"Login Error ({service}) HTTP {r.status}: {js}"
-                )
 
-            token = js.get("access_token")
+                if tag:
+                    tags.append(tag)
 
-            if not token:
-                raise RuntimeError(
-                    f"Login response has no access_token "
-                    f"({service}): {js}"
-                )
+        if tags:
+            result[protocol] = tags
 
-            print(f"✅ LOGIN {service.upper()} SUCCESS")
+    return result
 
-            return token, panel_url
 
-    except asyncio.TimeoutError:
-        raise RuntimeError(
-            f"{service.title()} panel login timeout"
-        )
+def _build_proxies(inbounds):
+    """
+    برای هر پروتکلی که inbound فعال دارد،
+    proxy خالی می‌سازیم تا Marzban UUID/تنظیمات لازم را تولید کند.
+    """
 
-    except aiohttp.ClientError as e:
-        print(
-            f"🌐 LOGIN {service.upper()} NETWORK ERROR:",
-            repr(e),
-        )
-        raise RuntimeError(
-            f"{service.title()} panel network error: {e}"
-        )
+    proxies = {}
+
+    for protocol in inbounds.keys():
+
+        if protocol in (
+            "vless",
+            "vmess",
+            "trojan",
+            "shadowsocks",
+            "wireguard",
+            "hysteria",
+            "hysteria2",
+        ):
+            proxies[protocol] = {}
+
+    # اگر VLESS فعال باشد، flow استاندارد Reality را اضافه می‌کنیم
+    if "vless" in proxies:
+        proxies["vless"]["flow"] = "xtls-rprx-vision"
+
+    return proxies
+
+
+def _extract_subscription_url(data):
+    if not isinstance(data, dict):
+        return None
+
+    # نام‌های رایج در نسخه‌های مختلف
+    for key in (
+        "subscription_url",
+        "subscriptionUrl",
+        "sub_url",
+        "subscription",
+    ):
+        value = data.get(key)
+
+        if isinstance(value, str) and value.strip():
+            return value.strip()
+
+    # بعضی نسخه‌ها لینک را داخل links می‌دهند
+    links = data.get("links")
+
+    if isinstance(links, list) and links:
+        for link in links:
+            if isinstance(link, str) and link.startswith(("http://", "https://")):
+                return link
+
+    return None
 
 
 async def create_customer(
     username,
-    gb,
-    unlimited=False,
-    days=30,
-    group_ids=None,
-    note="",
+    data_limit_gb,
     service="gold",
+    expire_days=30,
+    note="",
 ):
+    """
+    ساخت کاربر در Gold / Silver / Bronze.
+
+    data_limit_gb:
+        حجم بر حسب GB
+
+    service:
+        gold
+        silver
+        bronze
+    """
+
     service = (service or "gold").lower()
 
-    if group_ids is None:
-        group_ids = [DEFAULT_GROUP_ID]
+    panel_url, panel_username, panel_password = _panel_config(service)
 
-    timeout = aiohttp.ClientTimeout(
-        total=30,
-        connect=10,
-        sock_connect=10,
-        sock_read=15,
+    if not panel_url:
+        raise RuntimeError(
+            f"Panel URL not configured for {service}"
+        )
+
+    if not panel_username or not panel_password:
+        raise RuntimeError(
+            f"Panel credentials not configured for {service}"
+        )
+
+    # نام کاربری فقط حروف/اعداد/_
+    safe_username = str(username)
+
+    allowed = (
+        "abcdefghijklmnopqrstuvwxyz"
+        "ABCDEFGHIJKLMNOPQRSTUVWXYZ"
+        "0123456789_"
     )
 
-    connector = aiohttp.TCPConnector(
-        limit=10,
-        ttl_dns_cache=300,
+    safe_username = "".join(
+        c if c in allowed else "_"
+        for c in safe_username
     )
 
-    async with aiohttp.ClientSession(
-        timeout=timeout,
-        connector=connector,
-    ) as session:
+    if len(safe_username) < 3:
+        safe_username = (
+            f"user_{safe_username}"
+        )
 
-        try:
-            token, panel_url = await _login(
-                session,
-                service,
+    safe_username = safe_username[:32]
+
+    # جلوگیری از username تکراری
+    safe_username = (
+        f"{safe_username}_{uuid.uuid4().hex[:6]}"
+    )
+
+    data_limit_bytes = int(
+        float(data_limit_gb) * 1024 * 1024 * 1024
+    )
+
+    if expire_days:
+        expire = int(
+            (datetime.utcnow() + timedelta(days=expire_days)).timestamp()
+        )
+    else:
+        expire = 0
+
+    async with aiohttp.ClientSession() as session:
+
+        # -------------------------
+        # LOGIN
+        # -------------------------
+        token = await _login(
+            session,
+            service=service,
+        )
+
+        headers = {
+            "accept": "application/json",
+            "Content-Type": "application/json",
+            "Authorization": f"Bearer {token}",
+        }
+
+        # -------------------------
+        # GET INBOUNDS
+        # -------------------------
+        inbounds_data = await _get_inbounds(
+            session,
+            panel_url,
+            token,
+        )
+
+        inbounds = _build_marzban_inbounds(
+            inbounds_data
+        )
+
+        if not inbounds:
+            raise RuntimeError(
+                f"No active inbounds found on {service} panel"
             )
 
-            headers = {
-                "Authorization": f"Bearer {token}",
-                "Accept": "application/json",
-                "Content-Type": "application/json",
-            }
+        proxies = _build_proxies(inbounds)
 
-            expire = (
-                datetime.now().astimezone()
-                + timedelta(days=days)
-            ).isoformat(timespec="seconds")
-
-            payload = {
-                "username": username,
-                "status": DEFAULT_STATUS or "active",
-                "data_limit": (
-                    0
-                    if unlimited
-                    else int(float(gb) * GB)
-                ),
-                "expire": expire,
-                "group_ids": group_ids,
-                "hwid_limit": (
-                    None
-                    if DEFAULT_HWID_LIMIT == 0
-                    else DEFAULT_HWID_LIMIT
-                ),
-                "next_plan": None,
-                "note": note,
-                "proxy_settings": {
-                    "shadowsocks": {
-                        "method": SHADOWSOCKS_METHOD
-                    }
-                },
-            }
-
-            print(
-                f"👤 CREATE {service.upper()} USER:",
-                username,
-            )
-            print(
-                f"📦 CREATE {service.upper()} GB:",
-                gb,
+        if not proxies:
+            raise RuntimeError(
+                f"No supported protocols found on {service} panel"
             )
 
-            async with session.post(
-                f"{panel_url}/api/user",
-                headers=headers,
-                json=payload,
-            ) as r:
+        # -------------------------
+        # CREATE USER
+        # -------------------------
+        payload = {
+            "username": safe_username,
+            "status": DEFAULT_STATUS or "active",
+            "expire": expire,
+            "data_limit": data_limit_bytes,
+            "data_limit_reset_strategy": "no_reset",
+            "proxies": proxies,
+            "inbounds": inbounds,
+            "note": note or f"AlphaShop {service}",
+        }
 
-                raw = await r.text()
+        url = f"{panel_url}/api/user"
 
-                try:
-                    data = await r.json(
-                        content_type=None
-                    )
-                except Exception:
-                    data = {"raw": raw}
+        async with session.post(
+            url,
+            json=payload,
+            headers=headers,
+            timeout=aiohttp.ClientTimeout(total=45),
+        ) as response:
 
-                print(
-                    f"👤 CREATE {service.upper()} STATUS:",
-                    r.status,
-                )
-                print(
-                    f"📥 CREATE {service.upper()} RESPONSE:",
-                    data,
-                )
+            text = await response.text()
 
-                if r.status not in (200, 201):
-                    return {
-                        "ok": False,
-                        "data": data,
-                        "subscription_url": "",
-                        "connection_details": "",
-                        "config": "",
-                    }
-
-                subscription_url = _extract_connection(
-                    data,
-                    panel_url,
+            if response.status not in (200, 201):
+                raise RuntimeError(
+                    f"Create user failed [{service}] "
+                    f"HTTP {response.status}: {text[:2000]}"
                 )
 
-                final_username = (
-                    data.get("username", username)
-                    if isinstance(data, dict)
-                    else username
+            try:
+                result = await response.json()
+            except Exception:
+                raise RuntimeError(
+                    f"Create user returned invalid JSON [{service}]: "
+                    f"{text[:2000]}"
                 )
 
-                print(
-                    f"🔗 {service.upper()} CONNECTION:",
-                    subscription_url or "<EMPTY>",
-                )
+        subscription_url = _extract_subscription_url(result)
 
-                return {
-                    "ok": True,
-                    "data": data,
-                    "username": final_username,
-                    "subscription_url": subscription_url,
-                    "connection_details": subscription_url,
-                    "config": subscription_url,
-                }
-
-        except asyncio.TimeoutError:
-            return {
-                "ok": False,
-                "data": {"error": "Panel request timeout"},
-                "subscription_url": "",
-                "connection_details": "",
-                "config": "",
-            }
-
-        except Exception as e:
-            print(
-                f"❌ CREATE {service.upper()} EXCEPTION:",
-                repr(e),
-            )
-
-            return {
-                "ok": False,
-                "data": {"error": str(e)},
-                "subscription_url": "",
-                "connection_details": "",
-                "config": "",
-            }
+        # -------------------------
+        # RETURN STANDARD RESULT
+        # -------------------------
+        return {
+            "success": True,
+            "service": service,
+            "username": result.get(
+                "username",
+                safe_username
+            ),
+            "subscription_url": subscription_url,
+            "links": result.get("links", []),
+            "expire": result.get("expire", expire),
+            "data_limit": result.get(
+                "data_limit",
+                data_limit_bytes
+            ),
+            "raw": result,
+        }
