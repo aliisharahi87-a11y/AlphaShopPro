@@ -24,249 +24,6 @@ from config import (
 
 GB = 1024 * 1024 * 1024
 
-async def _json(response):
-    raw = await response.text()
-    try:
-        return await response.json(content_type=None)
-    except Exception:
-        return {'raw': raw[:4000]}
-
-
-def _first_url(obj):
-    if isinstance(obj, str):
-        s = obj.strip()
-        if s.startswith(('http://', 'https://')) or s.startswith(('vless://', 'vmess://', 'trojan://', 'ss://')):
-            return s
-        return ''
-    if isinstance(obj, dict):
-        for k in ('subscription_url','subscriptionUrl','sub_url','subUrl','link','url'):
-            v = obj.get(k)
-            if isinstance(v, str) and v.strip():
-                return v.strip()
-        for k in ('links','subscription','data','user','result'):
-            v = obj.get(k)
-            r = _first_url(v)
-            if r:
-                return r
-    if isinstance(obj, list):
-        for v in obj:
-            r = _first_url(v)
-            if r:
-                return r
-    return ''
-
-
-def _protocols_from_inbounds(data):
-    """Normalize Marzban /api/inbounds responses to {protocol: [tags]} ."""
-    out = {}
-    if isinstance(data, dict):
-        # Common Marzban shape: {"vless": ["tag1"], "vmess": ["tag2"]}
-        for proto, tags in data.items():
-            p = str(proto).lower()
-            if p in {'vless','vmess','trojan','shadowsocks'}:
-                if isinstance(tags, list):
-                    vals = [str(x) for x in tags if x]
-                elif isinstance(tags, dict):
-                    vals = [str(k) for k in tags.keys()]
-                else:
-                    vals = []
-                if vals or tags == {}:
-                    out[p] = vals
-        # Sometimes wrapped in data/inbounds.
-        if not out:
-            for key in ('data','inbounds','result'):
-                if key in data:
-                    return _protocols_from_inbounds(data[key])
-    elif isinstance(data, list):
-        for item in data:
-            if not isinstance(item, dict):
-                continue
-            proto = str(item.get('protocol') or item.get('type') or '').lower()
-            tag = item.get('tag') or item.get('remark') or item.get('name')
-            if proto in {'vless','vmess','trojan','shadowsocks'} and tag:
-                out.setdefault(proto, []).append(str(tag))
-    return out
-
-
-def _proxy_settings(protocol):
-    uid = str(uuid.uuid4())
-    if protocol == 'vless':
-        d = {'id': uid}
-        flow = os.getenv('SILVER_VLESS_FLOW', '').strip()
-        if flow:
-            d['flow'] = flow
-        return d
-    if protocol == 'vmess':
-        return {'id': uid, 'alterId': 0, 'security': 'auto'}
-    if protocol == 'trojan':
-        return {'password': uid}
-    if protocol == 'shadowsocks':
-        return {
-            'method': os.getenv('SILVER_SHADOWSOCKS_METHOD', globals().get('SHADOWSOCKS_METHOD', 'chacha20-ietf-poly1305')),
-            'password': uid,
-        }
-    raise ValueError(f'Unsupported Marzban protocol: {protocol}')
-
-
-async def _login_marzban(session, panel_url):
-    token = os.getenv('SILVER_PANEL_API_TOKEN', '').strip()
-    if token:
-        return token
-    user = os.getenv('SILVER_PANEL_USERNAME_NEW', os.getenv('SILVER_PANEL_USERNAME', globals().get('SILVER_PANEL_USERNAME', ''))).strip()
-    password = os.getenv('SILVER_PANEL_PASSWORD_NEW', os.getenv('SILVER_PANEL_PASSWORD', globals().get('SILVER_PANEL_PASSWORD', ''))).strip()
-    if not user or not password:
-        raise RuntimeError('Silver Marzban credentials are missing (SILVER_PANEL_USERNAME/PASSWORD)')
-    async with session.post(
-        f'{panel_url}/api/admin/token',
-        data={'grant_type':'password','username':user,'password':password},
-        headers={'Accept':'application/json','Content-Type':'application/x-www-form-urlencoded'},
-    ) as r:
-        data = await _json(r)
-        if r.status != 200:
-            raise RuntimeError(f'Marzban login HTTP {r.status}: {data}')
-        token = data.get('access_token') if isinstance(data, dict) else None
-        if not token:
-            token = data.get('token') if isinstance(data, dict) else None
-        if not token:
-            raise RuntimeError(f'Marzban login returned no token: {data}')
-        return token
-
-
-async def _create_marzban(session, username, gb, days):
-    panel_url = _clean_url(os.getenv('SILVER_PANEL_URL_NEW', os.getenv('SILVER_PANEL_URL', 'https://pan.linkesubs.com')))
-    token = await _login_marzban(session, panel_url)
-    headers = {'Authorization': f'Bearer {token}', 'Accept':'application/json', 'Content-Type':'application/json'}
-
-    # Read actual enabled inbounds first. This avoids forcing VLESS when the panel only has VMess/Trojan/etc.
-    async with session.get(f'{panel_url}/api/inbounds', headers=headers) as r:
-        inb_data = await _json(r)
-        if r.status != 200:
-            raise RuntimeError(f'Marzban /api/inbounds HTTP {r.status}: {inb_data}')
-    inbound_map = _protocols_from_inbounds(inb_data)
-    if not inbound_map:
-        raise RuntimeError(f'Marzban returned no usable inbounds: {inb_data}')
-
-    wanted = os.getenv('SILVER_PROTOCOL', '').strip().lower()
-    wanted_name = os.getenv('SILVER_INBOUND_NAME', '').strip()
-    if wanted not in inbound_map:
-        wanted = ''
-    protocol = wanted or next(iter(inbound_map))
-    tags = inbound_map.get(protocol) or []
-    if wanted_name and wanted_name in tags:
-        tags = [wanted_name]
-
-    # Marzban Add User API expects proxies + inbounds, not the Pasargard proxy_settings/group_ids shape.
-    payload = {
-        'username': username,
-        'status': 'active',
-        'data_limit': int(float(gb) * GB),
-        'expire': int(time.time()) + int(days) * 86400,
-        'proxies': {protocol: _proxy_settings(protocol)},
-        'inbounds': {protocol: tags},
-        'note': f'AlphaShop Silver',
-    }
-
-    async def post(payload_):
-        async with session.post(f'{panel_url}/api/user', headers=headers, json=payload_) as r:
-            return r.status, await _json(r)
-
-    status, data = await post(payload)
-    print(f'🥈 MARZBAN CREATE {username}: HTTP {status} protocol={protocol} inbounds={tags}')
-    print(f'🥈 MARZBAN RESPONSE: {data}')
-
-    # If a selected inbound is stale, retry with all inbounds of that protocol.
-    if status >= 400 and tags:
-        retry = dict(payload)
-        retry['inbounds'] = {protocol: []}
-        status, data = await post(retry)
-        print(f'🥈 MARZBAN RETRY-ALL-INBOUNDS: HTTP {status} protocol={protocol}')
-        print(f'🥈 MARZBAN RETRY RESPONSE: {data}')
-
-    # If the configured protocol is disabled/misconfigured, try every actually enabled protocol.
-    if status >= 400:
-        last = data
-        for p, p_tags in inbound_map.items():
-            if p == protocol:
-                continue
-            trial = {
-                'username': username,
-                'status': 'active',
-                'data_limit': int(float(gb) * GB),
-                'expire': int(time.time()) + int(days) * 86400,
-                'proxies': {p: _proxy_settings(p)},
-                'inbounds': {p: p_tags},
-                'note': 'AlphaShop Silver',
-            }
-            st, dat = await post(trial)
-            print(f'🥈 MARZBAN FALLBACK: HTTP {st} protocol={p} inbounds={p_tags}')
-            print(f'🥈 MARZBAN FALLBACK RESPONSE: {dat}')
-            last = dat
-            if st in (200, 201, 409):
-                status, data, protocol = st, dat, p
-                break
-        else:
-            data = last
-
-    if status == 409:
-        # User already exists: fetch it and return its current subscription instead of refunding.
-        pass
-    elif status not in (200, 201):
-        raise RuntimeError(f'Marzban create user HTTP {status}: {data}')
-
-    # POST /api/user normally contains subscription_url, but some versions return only user fields.
-    connection = _first_url(data)
-    user_data = data
-    if not connection:
-        async with session.get(f'{panel_url}/api/user/{username}', headers=headers) as r:
-            user_data = await _json(r)
-            print(f'🥈 MARZBAN GET USER HTTP {r.status}: {user_data}')
-            if r.status == 200:
-                connection = _first_url(user_data)
-
-    # Modern Marzban exposes the canonical subscription URL in user info. Keep a final fallback
-    # for versions where it is nested under links/subscription_url.
-    if not connection:
-        connection = _first_url(user_data)
-    if not connection:
-        raise RuntimeError(f'Marzban user created but no subscription_url/links returned: {user_data}')
-
-    merged = {}
-    if isinstance(data, dict):
-        merged.update(data)
-    if isinstance(user_data, dict):
-        merged['user'] = user_data
-    merged['subscription_url'] = connection
-    merged['protocol_used'] = protocol
-    return merged, connection
-
-
-async def _get_pasargard_subscription_links(session, panel_url, headers, created_data, username):
-    """Fallback used by Gold/Bronze Pasargard when /api/user does not include a link."""
-    candidates = []
-    user_id = None
-    if isinstance(created_data, dict):
-        user_id = created_data.get("id") or created_data.get("user_id") or created_data.get("userId")
-        nested = created_data.get("data")
-        if isinstance(nested, dict):
-            user_id = user_id or nested.get("id") or nested.get("user_id")
-    if user_id is not None:
-        candidates.append(f"{panel_url}/api/user/{user_id}/subscription/links")
-    candidates.append(f"{panel_url}/api/user/{username}/subscription/links")
-    for url in candidates:
-        try:
-            async with session.get(url, headers=headers) as r:
-                data = await _json(r)
-                print(f"🔗 PASARGARD SUB LINKS HTTP {r.status} -> {url}")
-                if r.status == 200:
-                    link = _first_url(data)
-                    if link:
-                        return link
-        except (aiohttp.ClientError, asyncio.TimeoutError) as exc:
-            print(f"⚠️ PASARGARD SUB LINKS FAILED: {exc!r}")
-    return ""
-
-
-
 
 def _clean_panel_url(url: str) -> str:
     """Return a clean panel base URL without dashboard/hash/query parts."""
@@ -552,7 +309,227 @@ async def _get_subscription_links(session, panel_url, headers, created_data, use
     return []
 
 
-async def create_customer(
+
+
+async def _json(response):
+    raw = await response.text()
+    try:
+        return await response.json(content_type=None)
+    except Exception:
+        return {'raw': raw[:4000]}
+
+
+def _first_url(obj):
+    if isinstance(obj, str):
+        s = obj.strip()
+        if s.startswith(('http://', 'https://')) or s.startswith(('vless://', 'vmess://', 'trojan://', 'ss://')):
+            return s
+        return ''
+    if isinstance(obj, dict):
+        for k in ('subscription_url','subscriptionUrl','sub_url','subUrl','link','url'):
+            v = obj.get(k)
+            if isinstance(v, str) and v.strip():
+                return v.strip()
+        for k in ('links','subscription','data','user','result'):
+            v = obj.get(k)
+            r = _first_url(v)
+            if r:
+                return r
+    if isinstance(obj, list):
+        for v in obj:
+            r = _first_url(v)
+            if r:
+                return r
+    return ''
+
+
+def _protocols_from_inbounds(data):
+    """Normalize Marzban /api/inbounds responses to {protocol: [tags]} ."""
+    out = {}
+    if isinstance(data, dict):
+        # Common Marzban shape: {"vless": ["tag1"], "vmess": ["tag2"]}
+        for proto, tags in data.items():
+            p = str(proto).lower()
+            if p in {'vless','vmess','trojan','shadowsocks'}:
+                if isinstance(tags, list):
+                    vals = [str(x) for x in tags if x]
+                elif isinstance(tags, dict):
+                    vals = [str(k) for k in tags.keys()]
+                else:
+                    vals = []
+                if vals or tags == {}:
+                    out[p] = vals
+        # Sometimes wrapped in data/inbounds.
+        if not out:
+            for key in ('data','inbounds','result'):
+                if key in data:
+                    return _protocols_from_inbounds(data[key])
+    elif isinstance(data, list):
+        for item in data:
+            if not isinstance(item, dict):
+                continue
+            proto = str(item.get('protocol') or item.get('type') or '').lower()
+            tag = item.get('tag') or item.get('remark') or item.get('name')
+            if proto in {'vless','vmess','trojan','shadowsocks'} and tag:
+                out.setdefault(proto, []).append(str(tag))
+    return out
+
+
+def _proxy_settings(protocol):
+    uid = str(uuid.uuid4())
+    if protocol == 'vless':
+        d = {'id': uid}
+        flow = os.getenv('SILVER_VLESS_FLOW', '').strip()
+        if flow:
+            d['flow'] = flow
+        return d
+    if protocol == 'vmess':
+        return {'id': uid, 'alterId': 0, 'security': 'auto'}
+    if protocol == 'trojan':
+        return {'password': uid}
+    if protocol == 'shadowsocks':
+        return {
+            'method': os.getenv('SILVER_SHADOWSOCKS_METHOD', globals().get('SHADOWSOCKS_METHOD', 'chacha20-ietf-poly1305')),
+            'password': uid,
+        }
+    raise ValueError(f'Unsupported Marzban protocol: {protocol}')
+
+
+async def _login_marzban(session, panel_url):
+    token = os.getenv('SILVER_PANEL_API_TOKEN', '').strip()
+    if token:
+        return token
+    user = os.getenv('SILVER_PANEL_USERNAME_NEW', os.getenv('SILVER_PANEL_USERNAME', globals().get('SILVER_PANEL_USERNAME', ''))).strip()
+    password = os.getenv('SILVER_PANEL_PASSWORD_NEW', os.getenv('SILVER_PANEL_PASSWORD', globals().get('SILVER_PANEL_PASSWORD', ''))).strip()
+    if not user or not password:
+        raise RuntimeError('Silver Marzban credentials are missing (SILVER_PANEL_USERNAME/PASSWORD)')
+    async with session.post(
+        f'{panel_url}/api/admin/token',
+        data={'grant_type':'password','username':user,'password':password},
+        headers={'Accept':'application/json','Content-Type':'application/x-www-form-urlencoded'},
+    ) as r:
+        data = await _json(r)
+        if r.status != 200:
+            raise RuntimeError(f'Marzban login HTTP {r.status}: {data}')
+        token = data.get('access_token') if isinstance(data, dict) else None
+        if not token:
+            token = data.get('token') if isinstance(data, dict) else None
+        if not token:
+            raise RuntimeError(f'Marzban login returned no token: {data}')
+        return token
+
+
+async def _create_marzban(session, username, gb, days):
+    panel_url = _clean_url(os.getenv('SILVER_PANEL_URL_NEW', os.getenv('SILVER_PANEL_URL', 'https://pan.linkesubs.com')))
+    token = await _login_marzban(session, panel_url)
+    headers = {'Authorization': f'Bearer {token}', 'Accept':'application/json', 'Content-Type':'application/json'}
+
+    # Read actual enabled inbounds first. This avoids forcing VLESS when the panel only has VMess/Trojan/etc.
+    async with session.get(f'{panel_url}/api/inbounds', headers=headers) as r:
+        inb_data = await _json(r)
+        if r.status != 200:
+            raise RuntimeError(f'Marzban /api/inbounds HTTP {r.status}: {inb_data}')
+    inbound_map = _protocols_from_inbounds(inb_data)
+    if not inbound_map:
+        raise RuntimeError(f'Marzban returned no usable inbounds: {inb_data}')
+
+    wanted = os.getenv('SILVER_PROTOCOL', globals().get('SILVER_PROTOCOL', 'vless')).strip().lower()
+    wanted_name = os.getenv('SILVER_INBOUND_NAME', globals().get('SILVER_INBOUND_NAME', '')).strip()
+    if wanted not in inbound_map:
+        wanted = ''
+    protocol = wanted or next(iter(inbound_map))
+    tags = inbound_map.get(protocol) or []
+    if wanted_name and wanted_name in tags:
+        tags = [wanted_name]
+
+    # Marzban Add User API expects proxies + inbounds, not the Pasargard proxy_settings/group_ids shape.
+    payload = {
+        'username': username,
+        'status': 'active',
+        'data_limit': int(float(gb) * GB),
+        'expire': int(time.time()) + int(days) * 86400,
+        'proxies': {protocol: _proxy_settings(protocol)},
+        'inbounds': {protocol: tags},
+        'note': f'AlphaShop Silver',
+    }
+
+    async def post(payload_):
+        async with session.post(f'{panel_url}/api/user', headers=headers, json=payload_) as r:
+            return r.status, await _json(r)
+
+    status, data = await post(payload)
+    print(f'🥈 MARZBAN CREATE {username}: HTTP {status} protocol={protocol} inbounds={tags}')
+    print(f'🥈 MARZBAN RESPONSE: {data}')
+
+    # If a selected inbound is stale, retry with all inbounds of that protocol.
+    if status >= 400 and tags:
+        retry = dict(payload)
+        retry['inbounds'] = {protocol: []}
+        status, data = await post(retry)
+        print(f'🥈 MARZBAN RETRY-ALL-INBOUNDS: HTTP {status} protocol={protocol}')
+        print(f'🥈 MARZBAN RETRY RESPONSE: {data}')
+
+    # If the configured protocol is disabled/misconfigured, try every actually enabled protocol.
+    if status >= 400:
+        last = data
+        for p, p_tags in inbound_map.items():
+            if p == protocol:
+                continue
+            trial = {
+                'username': username,
+                'status': 'active',
+                'data_limit': int(float(gb) * GB),
+                'expire': int(time.time()) + int(days) * 86400,
+                'proxies': {p: _proxy_settings(p)},
+                'inbounds': {p: p_tags},
+                'note': 'AlphaShop Silver',
+            }
+            st, dat = await post(trial)
+            print(f'🥈 MARZBAN FALLBACK: HTTP {st} protocol={p} inbounds={p_tags}')
+            print(f'🥈 MARZBAN FALLBACK RESPONSE: {dat}')
+            last = dat
+            if st in (200, 201, 409):
+                status, data, protocol = st, dat, p
+                break
+        else:
+            data = last
+
+    if status == 409:
+        # User already exists: fetch it and return its current subscription instead of refunding.
+        pass
+    elif status not in (200, 201):
+        raise RuntimeError(f'Marzban create user HTTP {status}: {data}')
+
+    # POST /api/user normally contains subscription_url, but some versions return only user fields.
+    connection = _first_url(data)
+    user_data = data
+    if not connection:
+        async with session.get(f'{panel_url}/api/user/{username}', headers=headers) as r:
+            user_data = await _json(r)
+            print(f'🥈 MARZBAN GET USER HTTP {r.status}: {user_data}')
+            if r.status == 200:
+                connection = _first_url(user_data)
+
+    # Modern Marzban exposes the canonical subscription URL in user info. Keep a final fallback
+    # for versions where it is nested under links/subscription_url.
+    if not connection:
+        connection = _first_url(user_data)
+    if not connection:
+        raise RuntimeError(f'Marzban user created but no subscription_url/links returned: {user_data}')
+
+    merged = {}
+    if isinstance(data, dict):
+        merged.update(data)
+    if isinstance(user_data, dict):
+        merged['user'] = user_data
+    merged['subscription_url'] = connection
+    merged['protocol_used'] = protocol
+    return merged, connection
+
+
+
+
+async def _create_pasargard_legacy(
     username,
     gb,
     unlimited=False,
@@ -572,28 +549,6 @@ async def create_customer(
     purchase/trial handlers do not break.
     """
     service = (service or "gold").lower()
-
-    if service == "silver":
-        timeout = aiohttp.ClientTimeout(total=30, connect=8, sock_connect=8, sock_read=18)
-        connector = aiohttp.TCPConnector(limit=10, ttl_dns_cache=300)
-        async with aiohttp.ClientSession(timeout=timeout, connector=connector) as session:
-            try:
-                merged, connection = await _create_marzban(session, str(username).strip(), gb, int(days))
-                final_username = (merged.get("username") if isinstance(merged, dict) else None) or str(username).strip()
-                return {
-                    "ok": True,
-                    "data": merged if isinstance(merged, dict) else {},
-                    "username": final_username,
-                    "subscription_url": connection,
-                    "connection_details": connection,
-                    "config": connection,
-                }
-            except asyncio.TimeoutError:
-                print("⏱️ CREATE SILVER TIMEOUT")
-                return {"ok": False, "data": {"error": "Silver Marzban request timeout"}, "subscription_url": "", "connection_details": "", "config": ""}
-            except Exception as exc:
-                print(f"❌ CREATE SILVER EXCEPTION: {exc!r}")
-                return {"ok": False, "data": {"error": str(exc)}, "subscription_url": "", "connection_details": "", "config": ""}
 
     if group_ids is None:
         group_ids = [DEFAULT_GROUP_ID]
@@ -731,3 +686,35 @@ async def create_customer(
                 "connection_details": "",
                 "config": "",
             }
+
+
+async def create_customer(username, gb, unlimited=False, days=30, group_ids=None, note="", service="gold"):
+    service = (service or "gold").lower()
+    username = str(username).strip()
+
+    if service == "silver":
+        timeout = aiohttp.ClientTimeout(total=60, connect=12, sock_connect=12, sock_read=35)
+        connector = aiohttp.TCPConnector(limit=10, ttl_dns_cache=300)
+        async with aiohttp.ClientSession(timeout=timeout, connector=connector) as session:
+            last_error = None
+            for attempt in range(1, 4):
+                try:
+                    data, connection = await _create_marzban(session, username, gb, days)
+                    return {"ok": True, "data": data, "username": username, "subscription_url": connection, "connection_details": connection, "config": connection}
+                except (aiohttp.ClientError, asyncio.TimeoutError) as exc:
+                    last_error = exc
+                    print(f"⚠️ SILVER transient panel error (attempt {attempt}/3): {exc!r}")
+                    if attempt < 3:
+                        await asyncio.sleep(2 * attempt)
+                except Exception as exc:
+                    last_error = exc
+                    print(f"❌ SILVER PANEL ERROR (attempt {attempt}/3): {exc!r}")
+                    msg = str(exc)
+                    if attempt < 3 and any(x in msg for x in ("HTTP 500", "HTTP 502", "HTTP 503", "HTTP 504", "timeout", "Timeout")):
+                        await asyncio.sleep(2 * attempt)
+                        continue
+                    break
+            return {"ok": False, "data": {"error": str(last_error or "Silver panel provisioning failed")}, "subscription_url": "", "connection_details": "", "config": ""}
+
+    # GOLD + BRONZE: original working Pasargard implementation.
+    return await _create_pasargard_legacy(username=username, gb=gb, unlimited=unlimited, days=days, group_ids=group_ids, note=note, service=service)
