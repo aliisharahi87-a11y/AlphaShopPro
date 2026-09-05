@@ -228,45 +228,133 @@ async def _get_subscription(session, token, panel_url, username):
 
 
 async def create_customer(username, gb, unlimited=False, days=30, group_ids=None, note="", service="gold"):
+    """Provision a customer with retries and recovery for lost API responses."""
     service = (service or "gold").lower()
     if group_ids is None:
         group_ids = [DEFAULT_GROUP_ID]
 
-    timeout = aiohttp.ClientTimeout(total=30, connect=8, sock_connect=8, sock_read=20)
+    # Panel APIs can occasionally take a few seconds or reset a connection.
+    # Keep the operation bounded, but retry transient failures.
+    timeout = aiohttp.ClientTimeout(total=60, connect=12, sock_connect=12, sock_read=35)
+
     async with aiohttp.ClientSession(timeout=timeout) as session:
-        try:
-            token, panel_url = await _login(session, service)
-            if service == "silver":
-                data = await _create_marzban(session, token, panel_url, username, gb, unlimited, days, note)
-            else:
-                headers = {"Authorization": f"Bearer {token}", "Content-Type": "application/json", "Accept": "application/json"}
-                payload = _pasargard_payload(username, gb, unlimited, days, group_ids, note)
-                status, data, _ = await _request_json(session, "POST", f"{panel_url}/api/user", headers=headers, json=payload)
-                # Some Pasargard versions do not accept optional group_ids/hwid/next_plan fields.
-                if status in (400, 422):
-                    minimal = {
-                        "username": username,
-                        "status": DEFAULT_STATUS,
-                        "data_limit": payload["data_limit"],
-                        "expire": payload["expire"],
-                        "note": note,
-                        "proxy_settings": payload["proxy_settings"],
+        last_error = None
+        for attempt in range(1, 4):
+            try:
+                token, panel_url = await _login(session, service)
+
+                if service == "silver":
+                    try:
+                        data = await _create_marzban(session, token, panel_url, username, gb, unlimited, days, note)
+                    except Exception as create_exc:
+                        # A request may have succeeded server-side while the response
+                        # was lost. Check the user before declaring failure.
+                        recovered = await _get_subscription(session, token, panel_url, username)
+                        if recovered:
+                            return {
+                                "ok": True,
+                                "data": {"username": username},
+                                "username": username,
+                                "subscription_url": recovered,
+                                "connection_details": recovered,
+                                "config": recovered,
+                            }
+                        raise create_exc
+                else:
+                    headers = {
+                        "Authorization": f"Bearer {token}",
+                        "Content-Type": "application/json",
+                        "Accept": "application/json",
                     }
-                    status, data, _ = await _request_json(session, "POST", f"{panel_url}/api/user", headers=headers, json=minimal)
-                if status not in (200, 201):
-                    raise RuntimeError(f"{service.title()} create user failed HTTP {status}: {data}")
+                    payload = _pasargard_payload(username, gb, unlimited, days, group_ids, note)
+                    status, data, _ = await _request_json(
+                        session, "POST", f"{panel_url}/api/user",
+                        headers=headers, json=payload
+                    )
 
-            connection = _extract_connection(data, panel_url)
-            if not connection:
-                connection = await _get_subscription(session, token, panel_url, username)
+                    # Some Pasargard versions reject optional fields.
+                    if status in (400, 422):
+                        minimal = {
+                            "username": username,
+                            "status": DEFAULT_STATUS,
+                            "data_limit": payload["data_limit"],
+                            "expire": payload["expire"],
+                            "note": note,
+                            "proxy_settings": payload["proxy_settings"],
+                        }
+                        status, data, _ = await _request_json(
+                            session, "POST", f"{panel_url}/api/user",
+                            headers=headers, json=minimal
+                        )
 
-            final_username = data.get("username", username) if isinstance(data, dict) else username
-            if not connection:
-                raise RuntimeError(f"{service.title()} user was created but no subscription/config was returned")
+                    if status not in (200, 201):
+                        # If the first POST actually created the user but its response
+                        # was lost, the user/subscription lookup can recover it.
+                        recovered = await _get_subscription(session, token, panel_url, username)
+                        if recovered:
+                            data = {"username": username}
+                        else:
+                            raise RuntimeError(
+                                f"{service.title()} create user failed HTTP {status}: {data}"
+                            )
 
-            return {"ok": True, "data": data, "username": final_username, "subscription_url": connection, "connection_details": connection, "config": connection}
-        except asyncio.TimeoutError:
-            return {"ok": False, "data": {"error": "Panel request timeout"}, "subscription_url": "", "connection_details": "", "config": ""}
-        except Exception as exc:
-            print(f"❌ {service.upper()} PANEL ERROR:", repr(exc))
-            return {"ok": False, "data": {"error": str(exc)}, "subscription_url": "", "connection_details": "", "config": ""}
+                    connection = _extract_connection(data, panel_url)
+                    if not connection:
+                        connection = await _get_subscription(session, token, panel_url, username)
+
+                    final_username = data.get("username", username) if isinstance(data, dict) else username
+                    if not connection:
+                        raise RuntimeError(
+                            f"{service.title()} user was created but no subscription/config was returned"
+                        )
+
+                    return {
+                        "ok": True,
+                        "data": data,
+                        "username": final_username,
+                        "subscription_url": connection,
+                        "connection_details": connection,
+                        "config": connection,
+                    }
+
+                # Marzban path: always verify/retrieve subscription after creation.
+                connection = _extract_connection(data, panel_url)
+                if not connection:
+                    connection = await _get_subscription(session, token, panel_url, username)
+                final_username = data.get("username", username) if isinstance(data, dict) else username
+                if not connection:
+                    raise RuntimeError(
+                        f"{service.title()} user was created but no subscription/config was returned"
+                    )
+                return {
+                    "ok": True,
+                    "data": data,
+                    "username": final_username,
+                    "subscription_url": connection,
+                    "connection_details": connection,
+                    "config": connection,
+                }
+
+            except (aiohttp.ClientError, asyncio.TimeoutError) as exc:
+                last_error = exc
+                print(f"⚠️ {service.upper()} transient panel error (attempt {attempt}/3): {exc!r}")
+                if attempt < 3:
+                    await asyncio.sleep(2 * attempt)
+                    continue
+            except Exception as exc:
+                last_error = exc
+                print(f"❌ {service.upper()} PANEL ERROR (attempt {attempt}/3):", repr(exc))
+                # For API 5xx/temporary failures hidden inside RuntimeError, retry.
+                msg = str(exc)
+                if attempt < 3 and any(x in msg for x in ("HTTP 500", "HTTP 502", "HTTP 503", "HTTP 504", "timeout", "Timeout")):
+                    await asyncio.sleep(2 * attempt)
+                    continue
+                break
+
+        return {
+            "ok": False,
+            "data": {"error": str(last_error or "Panel provisioning failed")},
+            "subscription_url": "",
+            "connection_details": "",
+            "config": "",
+        }

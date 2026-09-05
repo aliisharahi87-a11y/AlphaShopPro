@@ -901,10 +901,10 @@ async def _complete_pending_purchase(update, context):
 
     config = (
         result.get("connection_details")
-        or result.get("subscription_ur1")
+        or result.get("subscription_url")
         or result.get("config")
         or data.get("subscription_url")
-        or data.get("subscriptionUr1")
+        or data.get("subscriptionUrl")
         or data.get("config")
         or data.get("link")
         or data.get("url")
