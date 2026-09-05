@@ -1,8 +1,7 @@
 import asyncio
-import html
 
 from database import has_used_trial, set_trial_used
-from telegram import Update, InlineKeyboardButton, InlineKeyboardMarkup, ReplyKeyboardMarkup, KeyboardButton
+from telegram import Update, InlineKeyboardButton, InlineKeyboardMarkup, ReplyKeyboardMarkup, KeyboardButton, InputFile
 from telegram.ext import (
     Application,
     CallbackQueryHandler,
@@ -16,6 +15,7 @@ from telegram.ext import (
 from config import *
 import database as db
 from panel import create_customer
+from qr_card import make_connection_card
 
 
 DEP_AMOUNT, DEP_RECEIPT, CUSTOM_GB, COUPON_INPUT = range(4)
@@ -50,7 +50,6 @@ TEXT = {
         "choose_service": "🔌 سرویس موردنظر را انتخاب کنید:",
         "gold": "🥇 سرویس Gold",
         "silver": "🥈 سرویس Silver",
-        "bronze": "🥉 سرویس Bronze",
         "trial_choose": "🎁 نوع تست رایگان را انتخاب کنید:",
         "custom": "✏️ حجم دلخواه",
         "custom_prompt": "✏️ حجم موردنظر را به GB وارد کنید.\n\n💰 قیمت هر گیگ: {price:,} تومان",
@@ -79,7 +78,7 @@ TEXT = {
         "admin_only": "⛔ این بخش فقط برای مدیران است.",
         "trial": "🎁 تست رایگان",
         "trial_used": "❌ شما قبلاً از تست رایگان استفاده کرده‌اید.",
-        "trial_success": "🎉 تست رایگان شما فعال شد.\n\n📦 حجم: ۱۵۰ مگابایت\n📅 اعتبار: ۱ روز\n\n🔗 لینک اشتراک:\n{config}",
+        "trial_success": "🎉 تست رایگان شما فعال شد.\n\n📦 حجم: ۲۰۰ مگابایت\n📅 اعتبار: ۱ روز\n\n🔗 لینک اشتراک:\n{config}",
         "trial_error": "❌ ساخت تست رایگان با خطا مواجه شد.",
     },
     "en": {
@@ -111,7 +110,6 @@ TEXT = {
         "choose_service": "🔌 Choose your service:",
         "gold": "🥇 Gold Service",
         "silver": "🥈 Silver Service",
-        "bronze": "🥉 Bronze Service",
         "trial_choose": "🎁 Choose your free trial:",
         "custom": "✏️ Custom Volume",
         "custom_prompt": "✏️ Enter the desired volume in GB.\n\n💰 Price per GB: {price:,} Toman",
@@ -140,24 +138,10 @@ TEXT = {
         "admin_only": "⛔ This section is for administrators only.",
         "trial": "🎁 Free Trial",
         "trial_used": "❌ You have already used your free trial.",
-        "trial_success": "🎉 Your free trial has been activated.\n\n📦 Volume: 150 MB\n📅 Validity: 1 day\n\n🔗 Subscription:\n{config}",
+        "trial_success": "🎉 Your free trial has been activated.\n\n📦 Volume: 200 MB\n📅 Validity: 1 day\n\n🔗 Subscription:\n{config}",
         "trial_error": "❌ Failed to create free trial.",
     },
 }
-
-
-SERVICE_ORDER = ("gold", "silver", "bronze")
-SERVICE_STYLE = {"gold": "success", "silver": "primary", "bronze": "danger"}
-SERVICE_PRICE = {"gold": GOLD_PRICE_PER_GB, "silver": SILVER_PRICE_PER_GB, "bronze": BRONZE_PRICE_PER_GB}
-FREE_TRIAL_GB = 0.15
-
-
-def service_price(service):
-    return SERVICE_PRICE.get((service or "gold").lower(), GOLD_PRICE_PER_GB)
-
-
-def service_label(uid, service):
-    return TEXT[lang(uid)].get(service, service.title())
 
 
 def lang(uid):
@@ -167,6 +151,31 @@ def lang(uid):
 
 def tr(uid, key, **kwargs):
     return TEXT[lang(uid)][key].format(**kwargs)
+
+
+async def send_connection_result(message, uid, text, config, reply_markup=None):
+    """Send connection details as a centered QR card plus the full text."""
+    config_text = str(config or "Panel API did not return connection details.")
+    try:
+        card = make_connection_card(config)
+        if card is None:
+            await message.reply_text(text, reply_markup=reply_markup)
+            return
+
+        caption = text[:1024]
+        await message.reply_photo(
+            photo=InputFile(card, filename="alpha_shop_connection_qr.jpg"),
+            caption=caption,
+            reply_markup=reply_markup,
+        )
+        # Always send the untruncated connection value as text as well. This
+        # makes the link copyable even when Telegram truncates a caption.
+        if config_text not in caption:
+            await message.reply_text(config_text)
+    except Exception as exc:
+        print("❌ QR CARD SEND ERROR:", repr(exc))
+        # QR generation/upload must never hide the purchased connection.
+        await message.reply_text(text, reply_markup=reply_markup)
 
 
 def menu(uid):
@@ -509,7 +518,6 @@ async def shop(update, context):
     keyboard = InlineKeyboardMarkup([
         [InlineKeyboardButton(TEXT[l]["gold"], callback_data="shop_service:gold", style="success")],
         [InlineKeyboardButton(TEXT[l]["silver"], callback_data="shop_service:silver", style="primary")],
-        [InlineKeyboardButton(TEXT[l]["bronze"], callback_data="shop_service:bronze", style="danger")],
     ])
     await update.message.reply_text(tr(uid, "choose_service"), reply_markup=keyboard)
 
@@ -526,7 +534,7 @@ async def shop_service(update, context):
         rows.append([InlineKeyboardButton(
             f"{title} — {price}",
             callback_data=f"buy:{service}:{p['id']}",
-            style=SERVICE_STYLE.get(service, "primary"),
+            style="success" if service == "gold" else "primary",
         )])
     rows.append([InlineKeyboardButton(tr(uid, "custom"), callback_data=f"custom:{service}", style="primary")])
     await q.message.reply_text(
@@ -648,7 +656,7 @@ async def custom_start(update, context):
     await query.answer()
     service = query.data.split(":", 1)[1] if ":" in query.data else "gold"
     context.user_data["custom_service"] = service
-    price_per_gb = service_price(service)
+    price_per_gb = GOLD_PRICE_PER_GB if service == "gold" else SILVER_PRICE_PER_GB
     await query.message.reply_text(
         tr(query.from_user.id, "custom_prompt", price=price_per_gb)
     )
@@ -669,7 +677,7 @@ async def custom_gb(update, context):
         return CUSTOM_GB
 
     service = context.user_data.get("custom_service", "gold")
-    price_per_gb = service_price(service)
+    price_per_gb = GOLD_PRICE_PER_GB if service == "gold" else SILVER_PRICE_PER_GB
     original_price = gb * price_per_gb
     coupon = context.user_data.get("coupon")
     final_price = apply_discount(original_price, coupon)
@@ -917,6 +925,7 @@ async def _complete_pending_purchase(update, context):
 
     config = (
         result.get("connection_details")
+        or result.get("subscription_url")
         or result.get("subscription_ur1")
         or result.get("config")
         or data.get("subscription_url")
@@ -930,45 +939,26 @@ async def _complete_pending_purchase(update, context):
 
     db.complete_order(oid, final_username, str(config))
 
-    # Notify all admins about every successful purchase.
-    admin_service = service_label(uid, service)
-    admin_user = html.escape(update.effective_user.full_name or "-")
-    admin_username = html.escape("@" + update.effective_user.username if update.effective_user.username else "-")
-    admin_gb = "نامحدود" if unlimited else f"{gb} GB"
-    admin_text = (
-        "🛒 سفارش جدید با موفقیت تکمیل شد!\n\n"
-        f"🧾 سفارش: #{oid}\n"
-        f"🔌 سرویس: {admin_service}\n"
-        f"📦 حجم: {admin_gb}\n"
-        f"💰 مبلغ: {price:,} تومان\n"
-        f"👤 نام: {admin_user}\n"
-        f"🔹 یوزرنیم تلگرام: {admin_username}\n"
-        f"🆔 Telegram ID: {uid}\n"
-        f"👤 یوزرنیم پنل: {final_username}\n"
-        f"🔗 لینک/اطلاعات اتصال: {config or '-'}"
-    )
-    for admin_id in ADMIN_IDS:
-        try:
-            await context.bot.send_message(admin_id, admin_text)
-        except Exception:
-            pass
-
     # Only clear coupon after successful purchase.
     context.user_data.pop("pending_purchase", None)
     context.user_data.pop("custom_service", None)
     context.user_data.pop("coupon", None)
     context.user_data.pop("coupon_code", None)
 
-    await query.message.reply_text(
-        tr(
-            uid,
-            "order_success",
-            oid=oid,
-            gb="Unlimited" if unlimited else f"{gb} GB",
-            price=price,
-            username=final_username,
-            config=config or "Panel API did not return connection details.",
-        ),
+    order_text = tr(
+        uid,
+        "order_success",
+        oid=oid,
+        gb="Unlimited" if unlimited else f"{gb} GB",
+        price=price,
+        username=final_username,
+        config=config or "Panel API did not return connection details.",
+    )
+    await send_connection_result(
+        query.message,
+        uid,
+        order_text,
+        config,
         reply_markup=menu(uid),
     )
 
@@ -1319,7 +1309,6 @@ async def free_trial(update, context):
     keyboard = InlineKeyboardMarkup([
         [InlineKeyboardButton(TEXT[l]["gold"], callback_data="trial:gold", style="success")],
         [InlineKeyboardButton(TEXT[l]["silver"], callback_data="trial:silver", style="primary")],
-        [InlineKeyboardButton(TEXT[l]["bronze"], callback_data="trial:bronze", style="danger")],
     ])
     await update.message.reply_text(tr(uid, "trial_choose"), reply_markup=keyboard)
 
@@ -1333,7 +1322,7 @@ async def trial_service(update, context):
         await q.message.reply_text(tr(uid, "trial_used"), reply_markup=menu(uid))
         return
     username = f"{service}_trial_{uid}"
-    result = await create_customer(username=username, gb=FREE_TRIAL_GB, days=1, service=service)
+    result = await create_customer(username=username, gb=0.2, days=1, service=service)
     if not result["ok"]:
         await q.message.reply_text(tr(uid, "trial_error"), reply_markup=menu(uid))
         return
@@ -1350,7 +1339,18 @@ async def trial_service(update, context):
         or ""
     )
     db.set_trial_used(uid, service)
-    await q.message.reply_text(tr(uid, "trial_success", config=config or "Panel API did not return connection details."), reply_markup=menu(uid))
+    trial_text = tr(
+        uid,
+        "trial_success",
+        config=config or "Panel API did not return connection details.",
+    )
+    await send_connection_result(
+        q.message,
+        uid,
+        trial_text,
+        config,
+        reply_markup=menu(uid),
+    )
 
 
 def run_bot():
@@ -1402,7 +1402,7 @@ def run_bot():
 
     custom_conv = ConversationHandler(
         entry_points=[
-            CallbackQueryHandler(custom_start, pattern=r"^custom:(gold|silver|bronze)$")
+            CallbackQueryHandler(custom_start, pattern=r"^custom:(gold|silver)$")
         ],
         states={
             CUSTOM_GB: [
@@ -1492,8 +1492,8 @@ def run_bot():
         )
     )
 
-    app.add_handler(CallbackQueryHandler(shop_service, pattern=r"^shop_service:(gold|silver|bronze)$"))
-    app.add_handler(CallbackQueryHandler(trial_service, pattern=r"^trial:(gold|silver|bronze)$"))
+    app.add_handler(CallbackQueryHandler(shop_service, pattern=r"^shop_service:(gold|silver)$"))
+    app.add_handler(CallbackQueryHandler(trial_service, pattern=r"^trial:(gold|silver)$"))
 
     app.add_handler(
         CallbackQueryHandler(
