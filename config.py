@@ -41,18 +41,11 @@ GOLD_PANEL_URL = os.getenv("GOLD_PANEL_URL", PANEL_URL).rstrip("/")
 GOLD_PANEL_USERNAME = os.getenv("GOLD_PANEL_USERNAME", PANEL_USERNAME).strip()
 GOLD_PANEL_PASSWORD = os.getenv("GOLD_PANEL_PASSWORD", PANEL_PASSWORD).strip()
 
-# Legacy Silver panel is now Bronze. Keep the old SILVER_* env names as a
-# backward-compatible fallback for existing deployments.
-BRONZE_PANEL_URL = os.getenv("BRONZE_PANEL_URL", os.getenv("SILVER_PANEL_URL", "")).rstrip("/")
-BRONZE_PANEL_USERNAME = os.getenv("BRONZE_PANEL_USERNAME", os.getenv("SILVER_PANEL_USERNAME", "")).strip()
-BRONZE_PANEL_PASSWORD = os.getenv("BRONZE_PANEL_PASSWORD", os.getenv("SILVER_PANEL_PASSWORD", "")).strip()
+SILVER_PANEL_URL = os.getenv("SILVER_PANEL_URL", "").rstrip("/")
+SILVER_PANEL_USERNAME = os.getenv("SILVER_PANEL_USERNAME", "").strip()
+SILVER_PANEL_PASSWORD = os.getenv("SILVER_PANEL_PASSWORD", "").strip()
 
-# New Silver panel
-SILVER_PANEL_URL = os.getenv("SILVER_PANEL_URL_NEW", "").rstrip("/")
-SILVER_PANEL_USERNAME = os.getenv("SILVER_PANEL_USERNAME_NEW", "").strip()
-SILVER_PANEL_PASSWORD = os.getenv("SILVER_PANEL_PASSWORD_NEW", "").strip()
-
-GOLD_PRICE_PER_GB = int(os.getenv("GOLD_PRICE_PER_GB", "5000"))
+GOLD_PRICE_PER_GB = int(os.getenv("GOLD_PRICE_PER_GB", "4000"))
 SILVER_PRICE_PER_GB = int(os.getenv("SILVER_PRICE_PER_GB", "3000"))
 BRONZE_PRICE_PER_GB = int(os.getenv("BRONZE_PRICE_PER_GB", "1000"))
 
