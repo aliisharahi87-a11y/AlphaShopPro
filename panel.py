@@ -448,6 +448,45 @@ async def create_customer(
         subscription_url = _extract_subscription_url(result)
 
         # -------------------------
+        # GET FULL USER DATA
+        # بعضی نسخه‌های Marzban لینک Subscription
+        # را در پاسخ POST /api/user نمی‌فرستند.
+        # -------------------------
+        if not subscription_url:
+            try:
+                user_url = f"{panel_url}/api/user/{safe_username}"
+
+                async with session.get(
+                    user_url,
+                    headers={
+                        "accept": "application/json",
+                        "Authorization": f"Bearer {token}",
+                    },
+                    timeout=aiohttp.ClientTimeout(total=30),
+                ) as user_response:
+
+                    user_text = await user_response.text()
+
+                    if user_response.status == 200:
+                        try:
+                            full_user = await user_response.json()
+
+                            found_url = _extract_subscription_url(full_user)
+
+                            if found_url:
+                                subscription_url = found_url
+
+                            # اطلاعات کامل‌تر را نگه می‌داریم
+                            if isinstance(full_user, dict):
+                                result = full_user
+
+                        except Exception:
+                            pass
+
+            except Exception:
+                pass
+
+        # -------------------------
         # RETURN STANDARD RESULT
         # -------------------------
         final_username = result.get(
