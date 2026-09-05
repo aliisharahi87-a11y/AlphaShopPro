@@ -902,7 +902,7 @@ async def _complete_pending_purchase(update, context):
         return
 
     username = f"alpha_{uid}_{oid}"
-    result = await create_customer(username, gb, unlimited, service=service)
+    result = await create_customer(username=username, gb=gb, unlimited=unlimited, service=service)
 
     if not result["ok"]:
         db.refund(oid, uid, price)
