@@ -125,31 +125,46 @@ def _pasargard_payload(username, gb, unlimited, days, group_ids, note):
 
 
 def _parse_inbounds(data):
+    """Normalize Marzban /api/inbounds responses across versions."""
     found = []
-    if isinstance(data, dict):
-        for protocol, items in data.items():
-            if isinstance(items, list):
-                for item in items:
-                    if isinstance(item, dict):
-                        tag = item.get("tag") or item.get("remark") or item.get("name") or item.get("id")
-                        proto = str(item.get("protocol") or protocol).lower()
-                        if tag:
-                            found.append((proto, str(tag)))
-                    elif isinstance(item, str):
-                        found.append((str(protocol).lower(), item))
-            elif isinstance(items, dict):
-                tag = items.get("tag") or items.get("remark") or items.get("name")
-                if tag:
-                    found.append((str(items.get("protocol") or protocol).lower(), str(tag)))
-    elif isinstance(data, list):
-        for item in data:
-            if isinstance(item, dict):
-                tag = item.get("tag") or item.get("remark") or item.get("name")
-                proto = str(item.get("protocol") or item.get("type") or "vless").lower()
-                if tag:
-                    found.append((proto, str(tag)))
-    return found
 
+    def add(proto, tag):
+        proto = str(proto or "").strip().lower()
+        tag = str(tag or "").strip()
+        if proto and tag and (proto, tag) not in found:
+            found.append((proto, tag))
+
+    def walk(obj, protocol_hint=None):
+        if isinstance(obj, dict):
+            # Common Marzban shape: {"vless": [{"tag": "..."}], ...}
+            for key, value in obj.items():
+                key_l = str(key).lower()
+                if isinstance(value, list):
+                    for item in value:
+                        if isinstance(item, dict):
+                            proto = item.get("protocol") or item.get("type") or key_l
+                            tag = item.get("tag") or item.get("remark") or item.get("name") or item.get("id")
+                            add(proto, tag)
+                            walk(item, proto)
+                        elif isinstance(item, str):
+                            add(key_l, item)
+                elif isinstance(value, dict):
+                    proto = value.get("protocol") or value.get("type") or key_l
+                    tag = value.get("tag") or value.get("remark") or value.get("name") or value.get("id")
+                    add(proto, tag)
+                    walk(value, proto)
+        elif isinstance(obj, list):
+            for item in obj:
+                if isinstance(item, dict):
+                    proto = item.get("protocol") or item.get("type") or protocol_hint
+                    tag = item.get("tag") or item.get("remark") or item.get("name") or item.get("id")
+                    add(proto, tag)
+                    walk(item, proto)
+                elif isinstance(item, str) and protocol_hint:
+                    add(protocol_hint, item)
+
+    walk(data)
+    return found
 
 def _marzban_proxy(protocol):
     ident = str(uuid.uuid4())
@@ -169,48 +184,88 @@ def _marzban_proxy(protocol):
 
 
 async def _create_marzban(session, token, panel_url, username, gb, unlimited, days, note):
-    headers = {"Authorization": f"Bearer {token}", "Content-Type": "application/json", "Accept": "application/json"}
-    status, inbound_data, _ = await _request_json(session, "GET", f"{panel_url}/api/inbounds", headers=headers)
-    if status != 200:
-        raise RuntimeError(f"Marzban /api/inbounds failed HTTP {status}: {inbound_data}")
+    headers = {
+        "Authorization": f"Bearer {token}",
+        "Content-Type": "application/json",
+        "Accept": "application/json",
+    }
 
-    inbounds = _parse_inbounds(inbound_data)
-    wanted_name = SILVER_INBOUND_NAME.lower()
+    # Read available inbounds. If this endpoint is unavailable on an older
+    # Marzban build, we can still use the explicitly configured inbound name.
+    inbounds = []
+    status, inbound_data, raw = await _request_json(
+        session, "GET", f"{panel_url}/api/inbounds", headers=headers
+    )
+    if status == 200:
+        inbounds = _parse_inbounds(inbound_data)
+    else:
+        print(f"⚠️ Marzban /api/inbounds HTTP {status}: {inbound_data}")
+
+    wanted_name = str(SILVER_INBOUND_NAME or "").strip().lower()
+    wanted_protocol = str(SILVER_PROTOCOL or "vless").strip().lower()
+
     selected = None
     if wanted_name:
         selected = next((x for x in inbounds if x[1].lower() == wanted_name), None)
+        if not selected:
+            # If the admin explicitly configured an inbound tag, trust it even
+            # when /api/inbounds has a different response shape.
+            selected = (wanted_protocol, SILVER_INBOUND_NAME.strip())
     if not selected:
-        selected = next((x for x in inbounds if x[0] == SILVER_PROTOCOL), None)
+        selected = next((x for x in inbounds if x[0] == wanted_protocol), None)
     if not selected and inbounds:
         selected = inbounds[0]
     if not selected:
-        raise RuntimeError("Marzban returned no usable inbounds; set SILVER_INBOUND_NAME")
+        raise RuntimeError(
+            "Marzban has no usable inbound. Set SILVER_INBOUND_NAME in .env "
+            "to the exact inbound tag shown in Marzban."
+        )
 
     protocol, inbound_name = selected
+    protocol = protocol.lower()
     proxy = _marzban_proxy(protocol)
+
     payload = {
         "username": username,
         "proxies": {protocol: proxy},
         "inbounds": {protocol: [inbound_name]},
+        "expire": 0 if unlimited else int((datetime.now().astimezone() + timedelta(days=days)).timestamp()),
         "data_limit": 0 if unlimited else int(float(gb) * GB),
-        "expire": int((datetime.now().astimezone() + timedelta(days=days)).timestamp()),
         "data_limit_reset_strategy": "no_reset",
         "status": "active",
-        "note": note,
+        "note": note or "",
     }
-    status, data, _ = await _request_json(session, "POST", f"{panel_url}/api/user", headers=headers, json=payload)
+
+    print(
+        f"🟣 MARZBAN CREATE -> user={username} protocol={protocol} inbound={inbound_name}"
+    )
+
+    status, data, raw = await _request_json(
+        session, "POST", f"{panel_url}/api/user", headers=headers, json=payload
+    )
+
+    if status == 409:
+        # User may already have been created by a previous request. Recover it.
+        recovered = await _get_subscription(session, token, panel_url, username)
+        if recovered:
+            return {"username": username, "subscription_url": recovered, "links": [recovered]}
+        raise RuntimeError(f"Marzban user already exists HTTP 409: {data}")
+
     if status not in (200, 201):
-        raise RuntimeError(f"Marzban create user failed HTTP {status}: {data}")
+        raise RuntimeError(f"Marzban create user failed HTTP {status}: {data or raw}")
+
     return data
 
 
 async def _get_subscription(session, token, panel_url, username):
     headers = {"Authorization": f"Bearer {token}", "Accept": "application/json"}
     for path in (
-        f"/api/user/{username}/subscription/links",
-        f"/api/user/by-username/{username}/subscription/links",
         f"/api/user/{username}",
+        f"/api/user/{username}/subscription/links",
+        f"/api/user/{username}/subscription",
         f"/api/user/by-username/{username}",
+        f"/api/user/by-username/{username}/subscription/links",
+        f"/api/user/by-username/{username}/subscription",
     ):
         try:
             status, data, raw = await _request_json(session, "GET", panel_url + path, headers=headers)
