@@ -449,6 +449,10 @@ async def deposit_receipt(update, context):
         return ConversationHandler.END
 
     receipt = update.message.photo[-1].file_id
+    try:
+        await update.message.set_reaction(reaction=["❤"])
+    except Exception as e:
+        print(f"Receipt reaction error: {e}")
     rid = db.add_deposit(uid, amount, receipt)
     context.user_data.clear()
 
