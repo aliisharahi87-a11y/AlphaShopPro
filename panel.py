@@ -7,15 +7,19 @@ from config import (
     PANEL_URL,
     PANEL_USERNAME,
     PANEL_PASSWORD,
+
     GOLD_PANEL_URL,
     GOLD_PANEL_USERNAME,
     GOLD_PANEL_PASSWORD,
-    SILVER_PANEL_URL,
-    SILVER_PANEL_USERNAME,
-    SILVER_PANEL_PASSWORD,
+
+    SILVER_PANEL_URL_NEW,
+    SILVER_PANEL_USERNAME_NEW,
+    SILVER_PANEL_PASSWORD_NEW,
+
     BRONZE_PANEL_URL,
     BRONZE_PANEL_USERNAME,
     BRONZE_PANEL_PASSWORD,
+
     DEFAULT_GROUP_ID,
     DEFAULT_HWID_LIMIT,
     DEFAULT_STATUS,
@@ -25,30 +29,48 @@ from config import (
 GB = 1024 * 1024 * 1024
 
 
+def _clean_panel_url(url):
+    if not url:
+        return ""
+
+    url = str(url).strip().rstrip("/")
+
+    # حذف مسیر داشبورد از URL
+    for suffix in (
+        "/dashboard/#",
+        "/dashboard",
+    ):
+        if url.lower().endswith(suffix.lower()):
+            url = url[: -len(suffix)].rstrip("/")
+
+    return url
+
+
 def _panel_config(service="gold"):
     service = (service or "gold").lower()
 
     if service == "silver":
         return (
-            SILVER_PANEL_URL,
-            SILVER_PANEL_USERNAME,
-            SILVER_PANEL_PASSWORD,
-    BRONZE_PANEL_URL,
-    BRONZE_PANEL_USERNAME,
-    BRONZE_PANEL_PASSWORD,
+            _clean_panel_url(SILVER_PANEL_URL_NEW),
+            SILVER_PANEL_USERNAME_NEW,
+            SILVER_PANEL_PASSWORD_NEW,
+        )
+
+    if service == "bronze":
+        return (
+            _clean_panel_url(BRONZE_PANEL_URL),
+            BRONZE_PANEL_USERNAME,
+            BRONZE_PANEL_PASSWORD,
         )
 
     return (
-        GOLD_PANEL_URL or PANEL_URL,
+        _clean_panel_url(GOLD_PANEL_URL or PANEL_URL),
         GOLD_PANEL_USERNAME or PANEL_USERNAME,
         GOLD_PANEL_PASSWORD or PANEL_PASSWORD,
     )
 
 
 def _normalize_url(value, panel_url=""):
-    """
-    بعضی پنل‌ها subscription_url را بدون https:// برمی‌گردانند.
-    """
     if not value:
         return ""
 
@@ -60,28 +82,19 @@ def _normalize_url(value, panel_url=""):
     if value.startswith(("http://", "https://")):
         return value
 
-    # اگر پنل فقط hostname/path داده باشد
     if value.startswith("//"):
         return "https:" + value
 
-    if panel_url:
-        base = panel_url.rstrip("/")
+    if panel_url and value.startswith("/"):
+        return panel_url.rstrip("/") + value
 
-        if value.startswith("/"):
-            return base + value
-
-        # اگر چیزی شبیه hostname/path برگشته
-        if value.startswith("panel.") or "." in value.split("/")[0]:
-            return "https://" + value
+    if "." in value.split("/")[0]:
+        return "https://" + value
 
     return value
 
 
 def _extract_connection(data, panel_url=""):
-    """
-    استخراج لینک اشتراک از ساختارهای مختلف پاسخ پنل.
-    """
-
     if not isinstance(data, dict):
         return ""
 
@@ -96,7 +109,6 @@ def _extract_connection(data, panel_url=""):
         data.get("url"),
     ]
 
-    # بعضی APIها اطلاعات را داخل subscription قرار می‌دهند
     subscription = data.get("subscription")
 
     if isinstance(subscription, dict):
@@ -107,7 +119,6 @@ def _extract_connection(data, panel_url=""):
             subscription.get("link"),
         ])
 
-    # بعضی APIها proxy_settings دارند
     proxy_settings = data.get("proxy_settings")
 
     if isinstance(proxy_settings, dict):
@@ -140,8 +151,6 @@ async def _login(session, service="gold"):
             f"{service.title()} panel credentials are not configured"
         )
 
-    panel_url = panel_url.rstrip("/")
-
     data = {
         "grant_type": "password",
         "username": username,
@@ -159,8 +168,8 @@ async def _login(session, service="gold"):
             data=data,
             headers={
                 "Content-Type":
-                    "application/x-www-form-urlencoded;charset=UTF-8",
-                "Accept": "*/*",
+                    "application/x-www-form-urlencoded",
+                "Accept": "application/json",
             },
         ) as r:
 
@@ -193,16 +202,11 @@ async def _login(session, service="gold"):
                     f"({service}): {js}"
                 )
 
-            print(
-                f"✅ LOGIN {service.upper()} SUCCESS"
-            )
+            print(f"✅ LOGIN {service.upper()} SUCCESS")
 
             return token, panel_url
 
     except asyncio.TimeoutError:
-        print(
-            f"⏱️ LOGIN {service.upper()} TIMEOUT"
-        )
         raise RuntimeError(
             f"{service.title()} panel login timeout"
         )
@@ -232,10 +236,10 @@ async def create_customer(
         group_ids = [DEFAULT_GROUP_ID]
 
     timeout = aiohttp.ClientTimeout(
-        total=20,
-        connect=7,
-        sock_connect=7,
-        sock_read=12,
+        total=30,
+        connect=10,
+        sock_connect=10,
+        sock_read=15,
     )
 
     connector = aiohttp.TCPConnector(
@@ -296,8 +300,6 @@ async def create_customer(
             print(
                 f"📦 CREATE {service.upper()} GB:",
                 gb,
-                "UNLIMITED:",
-                unlimited,
             )
 
             async with session.post(
@@ -313,26 +315,18 @@ async def create_customer(
                         content_type=None
                     )
                 except Exception:
-                    data = {
-                        "raw": raw
-                    }
+                    data = {"raw": raw}
 
                 print(
                     f"👤 CREATE {service.upper()} STATUS:",
                     r.status,
                 )
-
                 print(
                     f"📥 CREATE {service.upper()} RESPONSE:",
                     data,
                 )
 
                 if r.status not in (200, 201):
-                    print(
-                        f"❌ CREATE {service.upper()} FAILED:",
-                        data,
-                    )
-
                     return {
                         "ok": False,
                         "data": data,
@@ -367,15 +361,9 @@ async def create_customer(
                 }
 
         except asyncio.TimeoutError:
-            print(
-                f"⏱️ CREATE {service.upper()} TIMEOUT"
-            )
-
             return {
                 "ok": False,
-                "data": {
-                    "error": "Panel request timeout"
-                },
+                "data": {"error": "Panel request timeout"},
                 "subscription_url": "",
                 "connection_details": "",
                 "config": "",
@@ -389,9 +377,7 @@ async def create_customer(
 
             return {
                 "ok": False,
-                "data": {
-                    "error": str(e)
-                },
+                "data": {"error": str(e)},
                 "subscription_url": "",
                 "connection_details": "",
                 "config": "",
