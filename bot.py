@@ -1,7 +1,6 @@
 import asyncio
 
-from database import has_used_trial, set_trial_used
-from telegram import Bot, Message, Update, InlineKeyboardButton, InlineKeyboardMarkup, ReplyKeyboardMarkup, KeyboardButton, MessageEntity
+from telegram import Update, InlineKeyboardButton, InlineKeyboardMarkup, ReplyKeyboardMarkup, KeyboardButton
 from telegram.ext import (
     Application,
     CallbackQueryHandler,
@@ -55,8 +54,8 @@ TEXT = {
         "custom_prompt": "✏️ حجم موردنظر را به GB وارد کنید.\n\n💰 قیمت هر گیگ: {price:,} تومان",
         "invalid_gb": "❌ حجم باید یک عدد صحیح بزرگ‌تر از صفر باشد.",
         "not_enough": "❌ موجودی کیف پول کافی نیست.\n\nموجودی: {balance:,} تومان\nقیمت: {price:,} تومان\n\nابتدا کیف پول خود را شارژ کنید.",
-        "order_success": "🎉 <b>سفارش شما با موفقیت فعال شد!</b>\n\n🧾 شماره سفارش: #{oid}\n🔌 سرویس: {service}\n📦 حجم: {gb}\n💰 مبلغ: {price:,} تومان\n👤 نام کاربری: <code>{username}</code>\n\n🔗 <b>لینک اشتراک / اطلاعات اتصال:</b>\n{config}",
-        "panel_error": "⚠️ <b>فعال‌سازی سرویس انجام نشد.</b>\n\nمبلغ سفارش به کیف پول شما برگشت داده شد.\nاگر مبلغ برگشت داده نشد یا مشکل ادامه داشت، لطفاً با پشتیبانی تماس بگیرید.",
+        "order_success": "🎉 سفارش شما با موفقیت ثبت شد!\n\n🧾 شماره سفارش: #{oid}\n📦 حجم: {gb}\n💰 مبلغ: {price:,} تومان\n👤 نام کاربری: {username}\n\n🔗 اطلاعات اتصال:\n{config}",
+        "panel_error": "⚠️ سفارش ثبت شد اما اتصال به پنل با موفقیت انجام نشد؛ مبلغ سفارش به کیف پول شما برگشت داده شد.\n\nلطفاً با پشتیبانی تماس بگیرید.",
         "ref": "👥 تعداد زیرمجموعه‌های شما: {count}\n🎁 درصد پاداش فعلی: {percent}%\n\n🔗 لینک دعوت شما:\n{link}",
         "no_orders": "📦 هنوز سفارشی ثبت نکرده‌اید.",
         "support_text": "📞 پشتیبانی آلفا شاپ\n\nبرای ارتباط با پشتیبانی از آیدی زیر استفاده کنید:\n{support}",
@@ -78,7 +77,7 @@ TEXT = {
         "admin_only": "⛔ این بخش فقط برای مدیران است.",
         "trial": "🎁 تست رایگان",
         "trial_used": "❌ شما قبلاً از تست رایگان استفاده کرده‌اید.",
-        "trial_success": "🎉 <b>تست رایگان {service} فعال شد!</b>\n\n📦 حجم: ۱۵۰ مگابایت\n📅 اعتبار: ۱ روز\n\n🔗 <b>لینک اشتراک / اطلاعات اتصال:</b>\n{config}",
+        "trial_success": "🎉 تست رایگان {service} شما فعال شد.\n\n📦 حجم: ۱۵۰ مگابایت\n📅 اعتبار: ۱ روز\n\n🔗 لینک اشتراک:\n{config}",
         "trial_error": "❌ ساخت تست رایگان با خطا مواجه شد.",
     },
     "en": {
@@ -116,8 +115,8 @@ TEXT = {
         "custom_prompt": "✏️ Enter the desired volume in GB.\n\n💰 Price per GB: {price:,} Toman",
         "invalid_gb": "❌ Volume must be a whole number greater than zero.",
         "not_enough": "❌ Insufficient wallet balance.\n\nBalance: {balance:,} Toman\nPrice: {price:,} Toman\n\nPlease add balance first.",
-        "order_success": "🎉 <b>Your service was activated successfully!</b>\n\n🧾 Order: #{oid}\n🔌 Service: {service}\n📦 Volume: {gb}\n💰 Amount: {price:,} Toman\n👤 Username: <code>{username}</code>\n\n🔗 <b>Subscription / connection information:</b>\n{config}",
-        "panel_error": "⚠️ <b>Service activation failed.</b>\n\nThe order amount was refunded to your wallet.\nPlease contact support if the issue continues.",
+        "order_success": "🎉 Your order was completed successfully!\n\n🧾 Order: #{oid}\n📦 Volume: {gb}\n💰 Amount: {price:,} Toman\n👤 Username: {username}\n\n🔗 Connection information:\n{config}",
+        "panel_error": "⚠️ The order could not be provisioned through the panel. Your payment was refunded to your wallet.\n\nPlease contact support.",
         "ref": "👥 Your referrals: {count}\n🎁 Current reward: {percent}%\n\n🔗 Your referral link:\n{link}",
         "no_orders": "📦 You have no orders yet.",
         "support_text": "📞 Alpha Shop Support\n\nContact us using:\n{support}",
@@ -139,155 +138,10 @@ TEXT = {
         "admin_only": "⛔ This section is for administrators only.",
         "trial": "🎁 Free Trial",
         "trial_used": "❌ You have already used your free trial.",
-        "trial_success": "🎉 <b>{service} free trial activated!</b>\n\n📦 Volume: 150 MB\n📅 Validity: 1 day\n\n🔗 <b>Subscription / connection information:</b>\n{config}",
+        "trial_success": "🎉 Your {service} free trial has been activated.\n\n📦 Volume: 150 MB\n📅 Validity: 1 day\n\n🔗 Subscription:\n{config}",
         "trial_error": "❌ Failed to create free trial.",
     },
 }
-
-
-# ایموجی‌های عادیِ رابط در زمان ارسال به ایموجی‌های پریمیوم تبدیل می‌شوند.
-# متن اصلی هر ایموجی حفظ می‌شود تا در کلاینت‌های ناسازگار به‌عنوان fallback نمایش داده شود.
-PREMIUM_EMOJI_IDS = {
-    "🌹": "5440911110838425969", "❤️": "5449505950283078474", "🔐": "5472308992514464048",
-    "📣": "5469903029144657419", "✅": "5427009714745517609", "🛒": "5431499171045581032",
-    "🎁": "5199749070830197566", "💰": "5375296873982604963", "👥": "5372926953978341366",
-    "🛍": "5373052667671093676", "📞": "5467539229468793355", "🧰": "5449428597922079323",
-    "📚": "5373098009640836781", "🌍": "5399898266265475100", "👈": "5469735272017043817",
-    "➕": "5226945370684140473", "🎟": "5377599075237502153", "❌": "5465665476971471368",
-    "🖼": "5375074927252621134", "🔗": "5375129357373165375", "🥇": "5280735858926822987",
-    "🥈": "5283195573812340110", "✏️": "5334673106202010226", "🎉": "5436040291507247633",
-    "📝": "5334882760735598374", "👤": "5373012449597335010", "❗️": "5467928559664242360",
-    "🪪": "5422683699130933153", "💡": "5472146462362048818", "📆": "5431897022456145283",
-    "🙏": "5472189549473963781", "💸": "5472030678633684592", "⏳": "5451732530048802485",
-    "🏠": "5465226866321268133", "🔄": "5264727218734524899", "📊": "5431577498364158238",
-    "📈": "5373001317042101552", "🚀": "5445284980978621387", "🇮🇷": "5271878966347601947",
-    "🇬🇧": "5202196682497859879",
-}
-
-# نمادهایی که در نگاشت عمومی ایموجی‌های پریمیوم موجود نیستند، با نماد پریمیوم هم‌معنا جایگزین می‌شوند.
-PREMIUM_EMOJI_REPLACEMENTS = {
-    "🎟️": "🎟", "🔒": "🔐", "📢": "📣", "📦": "🛍", "⚙️": "🧰", "🌐": "🌍",
-    "🔙": "👈", "💳": "💰", "📸": "🖼", "🔌": "🔗", "🧾": "📝", "⚠️": "❗️",
-    "🆔": "🪪", "⛔": "❌", "📅": "📆", "🛠": "🧰",
-}
-
-PREMIUM_NUMBER_REPLACEMENTS = {
-    "1️⃣": "1.", "2️⃣": "2.", "3️⃣": "3.", "4️⃣": "4.", "5️⃣": "5.", "6️⃣": "6.", "7️⃣": "7.",
-}
-
-_PREMIUM_EMOJI_PATTERN = __import__("re").compile(
-    "|".join(__import__("re").escape(emoji) for emoji in sorted(PREMIUM_EMOJI_IDS, key=len, reverse=True))
-)
-
-
-def _normalise_premium_emoji_text(text):
-    if not isinstance(text, str):
-        return text
-    for ordinary, premium_fallback in PREMIUM_EMOJI_REPLACEMENTS.items():
-        text = text.replace(ordinary, premium_fallback)
-    for keycap, plain_number in PREMIUM_NUMBER_REPLACEMENTS.items():
-        text = text.replace(keycap, plain_number)
-    return text
-
-
-def _custom_emoji_entities(text):
-    entities = []
-    for match in _PREMIUM_EMOJI_PATTERN.finditer(text):
-        # Telegram Bot API offsets are UTF-16 code units, not Python code points.
-        offset = len(text[:match.start()].encode("utf-16-le")) // 2
-        length = len(match.group(0).encode("utf-16-le")) // 2
-        entities.append(
-            MessageEntity(
-                type="custom_emoji",
-                offset=offset,
-                length=length,
-                custom_emoji_id=PREMIUM_EMOJI_IDS[match.group(0)],
-            )
-        )
-    return entities
-
-
-def _premium_html(text):
-    text = _normalise_premium_emoji_text(text)
-    return _PREMIUM_EMOJI_PATTERN.sub(
-        lambda match: f'<tg-emoji emoji-id="{PREMIUM_EMOJI_IDS[match.group(0)]}">{match.group(0)}</tg-emoji>',
-        text,
-    )
-
-
-def _premium_button_text(text):
-    text = _normalise_premium_emoji_text(text)
-    match = _PREMIUM_EMOJI_PATTERN.match(text)
-    if not match:
-        return text, None
-    return text[match.end():].lstrip(), PREMIUM_EMOJI_IDS[match.group(0)]
-
-
-# آیکن دکمه‌ها با Custom Emoji تلگرام نمایش داده می‌شود؛ متن دکمه بدون ایموجی نگه داشته می‌شود.
-_TelegramInlineKeyboardButton = InlineKeyboardButton
-_TelegramKeyboardButton = KeyboardButton
-
-
-def InlineKeyboardButton(text, *args, **kwargs):
-    text, icon_custom_emoji_id = _premium_button_text(text)
-    if icon_custom_emoji_id:
-        kwargs.setdefault("icon_custom_emoji_id", icon_custom_emoji_id)
-    return _TelegramInlineKeyboardButton(text, *args, **kwargs)
-
-
-def KeyboardButton(text, *args, **kwargs):
-    text, icon_custom_emoji_id = _premium_button_text(text)
-    if icon_custom_emoji_id:
-        kwargs.setdefault("icon_custom_emoji_id", icon_custom_emoji_id)
-    return _TelegramKeyboardButton(text, *args, **kwargs)
-
-
-# همهٔ پیام‌ها، ویرایش‌ها و کپشن‌های خروجی، بدون تغییر محتوا، به Custom Emoji مجهز می‌شوند.
-_TelegramMessageEditText = Message.edit_text
-_TelegramBotSendMessage = Bot.send_message
-_TelegramBotSendPhoto = Bot.send_photo
-
-
-async def _premium_edit_text(self, text, *args, **kwargs):
-    if kwargs.get("entities") is None:
-        if kwargs.get("parse_mode"):
-            text = _premium_html(text)
-        else:
-            text = _normalise_premium_emoji_text(text)
-            entities = _custom_emoji_entities(text)
-            if entities:
-                kwargs["entities"] = entities
-    return await _TelegramMessageEditText(self, text, *args, **kwargs)
-
-
-async def _premium_send_message(self, chat_id, text, *args, **kwargs):
-    if kwargs.get("entities") is None:
-        if kwargs.get("parse_mode"):
-            text = _premium_html(text)
-        else:
-            text = _normalise_premium_emoji_text(text)
-            entities = _custom_emoji_entities(text)
-            if entities:
-                kwargs["entities"] = entities
-    return await _TelegramBotSendMessage(self, chat_id, text, *args, **kwargs)
-
-
-async def _premium_send_photo(self, chat_id, photo, caption=None, *args, **kwargs):
-    if caption and kwargs.get("caption_entities") is None:
-        if kwargs.get("parse_mode"):
-            caption = _premium_html(caption)
-        else:
-            caption = _normalise_premium_emoji_text(caption)
-            caption_entities = _custom_emoji_entities(caption)
-            if caption_entities:
-                kwargs["caption_entities"] = caption_entities
-    return await _TelegramBotSendPhoto(self, chat_id, photo, caption, *args, **kwargs)
-
-
-Message.edit_text = _premium_edit_text
-Bot.send_message = _premium_send_message
-Bot.send_photo = _premium_send_photo
-
 
 
 def lang(uid):
@@ -651,12 +505,12 @@ async def shop_service(update, context):
     service = q.data.split(":", 1)[1]
     rows = []
     for p in db.plans(service=service):
-        title = p["title_fa"] if lang(uid) == "fa" else p["title_en"]
-        price = "نامحدود" if p["unlimited"] else f"{p['price']:,} تومان"
+        title = (f"{int(p['gb'])} GB" if p["gb"] is not None else "نامحدود") if lang(uid) == "fa" else (f"{int(p['gb'])} GB" if p["gb"] is not None else "Unlimited")
+        price = "" if p["unlimited"] else f"{p['price']:,} تومان"
         rows.append([InlineKeyboardButton(
             f"{title} — {price}",
             callback_data=f"buy:{service}:{p['id']}",
-            style="success" if service == "gold" else "primary",
+            style={"gold":"success", "silver":"primary", "bronze":"danger"}.get(service, "primary"),
         )])
     rows.append([InlineKeyboardButton(tr(uid, "custom"), callback_data=f"custom:{service}", style="primary")])
     await q.message.reply_text(
@@ -906,18 +760,18 @@ async def coupon_input(update, context):
     code = update.message.text.strip().upper()
 
     menu_values = {
-        "منوی اصلی", "فروشگاه", "کیف پول",
-        "حساب کاربری", "زیرمجموعه‌گیری", "پشتیبانی",
-        "تنظیمات", "راهنما", "خرید سرویس",
-        "سفارش‌های من", "تست رایگان",
-        "MAIN MENU", "SHOP", "WALLET",
-        "ACCOUNT", "REFERRALS", "SUPPORT",
-        "SETTINGS", "GUIDE", "BUY SERVICE",
-        "MY ORDERS", "FREE TRIAL",
+        "🏠 منوی اصلی", "🛒 فروشگاه", "💰 کیف پول",
+        "👤 حساب کاربری", "👥 زیرمجموعه‌گیری", "📞 پشتیبانی",
+        "⚙️ تنظیمات", "📚 راهنما", "🛒 خرید سرویس",
+        "📦 سفارش‌های من", "🎁 تست رایگان",
+        "🏠 MAIN MENU", "🛒 SHOP", "💰 WALLET",
+        "👤 ACCOUNT", "👥 REFERRALS", "📞 SUPPORT",
+        "⚙️ SETTINGS", "📚 GUIDE", "🛒 BUY SERVICE",
+        "📦 MY ORDERS", "🎁 FREE TRIAL",
     }
 
     if code in menu_values:
-        if code in {"تست رایگان", "FREE TRIAL"}:
+        if code in {"🎁 تست رایگان", "🎁 FREE TRIAL"}:
             await free_trial(update, context)
             return ConversationHandler.END
 
@@ -1047,10 +901,10 @@ async def _complete_pending_purchase(update, context):
 
     config = (
         result.get("connection_details")
-        or result.get("subscription_ur1")
+        or result.get("subscription_url")
         or result.get("config")
         or data.get("subscription_url")
-        or data.get("subscriptionUr1")
+        or data.get("subscriptionUrl")
         or data.get("config")
         or data.get("link")
         or data.get("url")
@@ -1059,6 +913,26 @@ async def _complete_pending_purchase(update, context):
     final_username = data.get("username", username)
 
     db.complete_order(oid, final_username, str(config))
+
+    service_label = TEXT[lang(uid)].get(service, service.title())
+    user = db.get_user(uid)
+    admin_text = (
+        "🟢 <b>سفارش جدید با موفقیت ساخته شد</b>\n\n"
+        f"🧾 سفارش: <code>#{oid}</code>\n"
+        f"🔌 سرویس: <b>{service_label}</b>\n"
+        f"📦 حجم: <b>{'Unlimited' if unlimited else str(gb) + ' GB'}</b>\n"
+        f"💰 مبلغ: <b>{price:,} تومان</b>\n"
+        f"👤 کاربر: <b>{query.from_user.full_name}</b>\n"
+        f"🆔 Telegram ID: <code>{uid}</code>\n"
+        f"📛 Username: @{query.from_user.username or '-'}\n"
+        f"🔑 Panel Username: <code>{final_username}</code>\n"
+        f"🔗 Connection: {config or '-'}"
+    )
+    for admin_id in ADMIN_IDS:
+        try:
+            await context.bot.send_message(admin_id, admin_text, parse_mode="HTML")
+        except Exception as exc:
+            print("Admin notification failed:", admin_id, repr(exc))
 
     # Only clear coupon after successful purchase.
     context.user_data.pop("pending_purchase", None)
@@ -1074,7 +948,6 @@ async def _complete_pending_purchase(update, context):
             gb="Unlimited" if unlimited else f"{gb} GB",
             price=price,
             username=final_username,
-            service=TEXT[lang(uid)].get(service, service.title()),
             config=config or "Panel API did not return connection details.",
         ),
         reply_markup=menu(uid),
@@ -1458,7 +1331,7 @@ async def trial_service(update, context):
         or ""
     )
     db.set_trial_used(uid, service)
-    await q.message.reply_text(tr(uid, "trial_success", service=TEXT[l][service], config=config or "Panel API did not return connection details."), reply_markup=menu(uid))
+    await q.message.reply_text(tr(uid, "trial_success", service=TEXT[lang(uid)][service], config=config or "Panel API did not return connection details."), reply_markup=menu(uid))
 
 
 def run_bot():
@@ -1534,12 +1407,12 @@ def run_bot():
                     filters.TEXT
                     & ~filters.COMMAND
                     & ~filters.Regex(
-                        r"^(منوی اصلی|فروشگاه|کیف پول|"
-                        r"حساب کاربری|زیرمجموعه‌گیری|پشتیبانی|"
-                        r"تنظیمات|راهنما|خرید سرویس|سفارش‌های من|"
-                        r"Main Menu|Shop|Wallet|"
-                        r"Account|Referrals|Support|"
-                        r"Settings|Guide|Buy Service|My Orders)$"
+                        r"^(🏠 منوی اصلی|🛒 فروشگاه|💰 کیف پول|"
+                        r"👤 حساب کاربری|👥 زیرمجموعه‌گیری|📞 پشتیبانی|"
+                        r"⚙️ تنظیمات|📚 راهنما|🛒 خرید سرویس|📦 سفارش‌های من|"
+                        r"🏠 Main Menu|🛒 Shop|💰 Wallet|"
+                        r"👤 Account|👥 Referrals|📞 Support|"
+                        r"⚙️ Settings|📚 Guide|🛒 Buy Service|📦 My Orders)$"
                     ),
                     coupon_input,
                 ),
@@ -1620,56 +1493,56 @@ def run_bot():
     # Reply keyboard handlers
     app.add_handler(
         MessageHandler(
-            filters.Regex(r"^(خرید سرویس|Buy Service)$"),
+            filters.Regex(r"^(🛒 خرید سرویس|🛒 Buy Service)$"),
             shop,
         )
     )
 
     app.add_handler(
         MessageHandler(
-            filters.Regex(r"^(تست رایگان|Free Trial)$"),
+            filters.Regex(r"^(🎁 تست رایگان|🎁 Free Trial)$"),
             free_trial,
         )
     )
 
     app.add_handler(
         MessageHandler(
-            filters.Regex(r"^(کیف پول|Wallet)$"),
+            filters.Regex(r"^(💰 کیف پول|💰 Wallet)$"),
             wallet,
         )
     )
 
     app.add_handler(
         MessageHandler(
-            filters.Regex(r"^(زیرمجموعه‌گیری|Referrals)$"),
+            filters.Regex(r"^(👥 زیرمجموعه‌گیری|👥 Referrals)$"),
             referrals,
         )
     )
 
     app.add_handler(
         MessageHandler(
-            filters.Regex(r"^(سفارش‌های من|My Orders)$"),
+            filters.Regex(r"^(📦 سفارش‌های من|📦 My Orders)$"),
             orders,
         )
     )
 
     app.add_handler(
         MessageHandler(
-            filters.Regex(r"^(پشتیبانی|Support)$"),
+            filters.Regex(r"^(📞 پشتیبانی|📞 Support)$"),
             support,
         )
     )
 
     app.add_handler(
         MessageHandler(
-            filters.Regex(r"^(تنظیمات|Settings)$"),
+            filters.Regex(r"^(⚙️ تنظیمات|⚙️ Settings)$"),
             settings,
         )
     )
 
     app.add_handler(
         MessageHandler(
-            filters.Regex(r"^(راهنما|Guide)$"),
+            filters.Regex(r"^(📚 راهنما|📚 Guide)$"),
             guide,
         )
     )
