@@ -1,6 +1,5 @@
 import asyncio
 
-from database import has_used_trial, set_trial_used
 from telegram import Update, InlineKeyboardButton, InlineKeyboardMarkup, ReplyKeyboardMarkup, KeyboardButton
 from telegram.ext import (
     Application,
@@ -18,11 +17,6 @@ from panel import create_customer
 
 
 DEP_AMOUNT, DEP_RECEIPT, CUSTOM_GB, COUPON_INPUT = range(4)
-SERVICE_PRICES = {
-    "gold": GOLD_PRICE_PER_GB,
-    "silver": SILVER_PRICE_PER_GB,
-    "bronze": BRONZE_PRICE_PER_GB,
-}
 
 TEXT = {
     "fa": {
@@ -83,7 +77,7 @@ TEXT = {
         "admin_only": "⛔ این بخش فقط برای مدیران است.",
         "trial": "🎁 تست رایگان",
         "trial_used": "❌ شما قبلاً از تست رایگان استفاده کرده‌اید.",
-        "trial_success": "🎉 تست رایگان شما فعال شد.\n\n📦 حجم: ۱۵۰ مگابایت\n📅 اعتبار: ۱ روز\n\n🔗 لینک اشتراک:\n{config}",
+        "trial_success": "🎉 تست رایگان {service} شما فعال شد.\n\n📦 حجم: ۱۵۰ مگابایت\n📅 اعتبار: ۱ روز\n\n🔗 لینک اشتراک:\n{config}",
         "trial_error": "❌ ساخت تست رایگان با خطا مواجه شد.",
     },
     "en": {
@@ -144,7 +138,7 @@ TEXT = {
         "admin_only": "⛔ This section is for administrators only.",
         "trial": "🎁 Free Trial",
         "trial_used": "❌ You have already used your free trial.",
-        "trial_success": "🎉 Your free trial has been activated.\n\n📦 Volume: 150 MB\n📅 Validity: 1 day\n\n🔗 Subscription:\n{config}",
+        "trial_success": "🎉 Your {service} free trial has been activated.\n\n📦 Volume: 150 MB\n📅 Validity: 1 day\n\n🔗 Subscription:\n{config}",
         "trial_error": "❌ Failed to create free trial.",
     },
 }
@@ -516,7 +510,7 @@ async def shop_service(update, context):
         rows.append([InlineKeyboardButton(
             f"{title} — {price}",
             callback_data=f"buy:{service}:{p['id']}",
-            style="success" if service == "gold" else "primary",
+            style={"gold":"success", "silver":"primary", "bronze":"danger"}.get(service, "primary"),
         )])
     rows.append([InlineKeyboardButton(tr(uid, "custom"), callback_data=f"custom:{service}", style="primary")])
     await q.message.reply_text(
@@ -638,7 +632,7 @@ async def custom_start(update, context):
     await query.answer()
     service = query.data.split(":", 1)[1] if ":" in query.data else "gold"
     context.user_data["custom_service"] = service
-    price_per_gb = SERVICE_PRICES.get(service, GOLD_PRICE_PER_GB)
+    price_per_gb = {"gold": GOLD_PRICE_PER_GB, "silver": SILVER_PRICE_PER_GB, "bronze": BRONZE_PRICE_PER_GB}.get(service, GOLD_PRICE_PER_GB)
     await query.message.reply_text(
         tr(query.from_user.id, "custom_prompt", price=price_per_gb)
     )
@@ -659,7 +653,7 @@ async def custom_gb(update, context):
         return CUSTOM_GB
 
     service = context.user_data.get("custom_service", "gold")
-    price_per_gb = SERVICE_PRICES.get(service, GOLD_PRICE_PER_GB)
+    price_per_gb = {"gold": GOLD_PRICE_PER_GB, "silver": SILVER_PRICE_PER_GB, "bronze": BRONZE_PRICE_PER_GB}.get(service, GOLD_PRICE_PER_GB)
     original_price = gb * price_per_gb
     coupon = context.user_data.get("coupon")
     final_price = apply_discount(original_price, coupon)
@@ -853,26 +847,6 @@ async def coupon_input(update, context):
     )
     return ConversationHandler.END
 
-async def notify_admins_purchase(context, uid, service, oid, gb, price, username, config):
-    service_label = TEXT.get("fa", {}).get(service, service.title())
-    user = db.get_user(uid)
-    tg_username = f"@{user['username']}" if user and user["username"] else "-"
-    text = (
-        "🛒 <b>سفارش جدید ثبت شد</b>\n\n"
-        f"🔌 سرویس: <b>{service_label}</b>\n"
-        f"🧾 سفارش: <code>#{oid}</code>\n"
-        f"👤 کاربر: <code>{uid}</code> {tg_username}\n"
-        f"📦 حجم: <b>{gb} GB</b>\n"
-        f"💰 مبلغ: <b>{price:,} تومان</b>\n"
-        f"🔑 پنل Username: <code>{username}</code>\n"
-        f"🔗 اتصال: {config or 'برنگشت'}"
-    )
-    for admin_id in ADMIN_IDS:
-        try:
-            await context.bot.send_message(admin_id, text, parse_mode="HTML")
-        except Exception as e:
-            print(f"Admin notification failed for {admin_id}: {e}")
-
 async def _complete_pending_purchase(update, context):
     query = update.callback_query
     uid = query.from_user.id
@@ -939,7 +913,26 @@ async def _complete_pending_purchase(update, context):
     final_username = data.get("username", username)
 
     db.complete_order(oid, final_username, str(config))
-    await notify_admins_purchase(context, uid, service, oid, gb, price, final_username, str(config))
+
+    service_label = TEXT[lang(uid)].get(service, service.title())
+    user = db.get_user(uid)
+    admin_text = (
+        "🟢 <b>سفارش جدید با موفقیت ساخته شد</b>\n\n"
+        f"🧾 سفارش: <code>#{oid}</code>\n"
+        f"🔌 سرویس: <b>{service_label}</b>\n"
+        f"📦 حجم: <b>{'Unlimited' if unlimited else str(gb) + ' GB'}</b>\n"
+        f"💰 مبلغ: <b>{price:,} تومان</b>\n"
+        f"👤 کاربر: <b>{query.from_user.full_name}</b>\n"
+        f"🆔 Telegram ID: <code>{uid}</code>\n"
+        f"📛 Username: @{query.from_user.username or '-'}\n"
+        f"🔑 Panel Username: <code>{final_username}</code>\n"
+        f"🔗 Connection: {config or '-'}"
+    )
+    for admin_id in ADMIN_IDS:
+        try:
+            await context.bot.send_message(admin_id, admin_text, parse_mode="HTML")
+        except Exception as exc:
+            print("Admin notification failed:", admin_id, repr(exc))
 
     # Only clear coupon after successful purchase.
     context.user_data.pop("pending_purchase", None)
@@ -1321,7 +1314,7 @@ async def trial_service(update, context):
         await q.message.reply_text(tr(uid, "trial_used"), reply_markup=menu(uid))
         return
     username = f"{service}_trial_{uid}"
-    result = await create_customer(username=username, gb=FREE_TEST_GB, days=FREE_TEST_DAYS, group_ids=[FREE_TEST_GROUP_ID], service=service)
+    result = await create_customer(username=username, gb=FREE_TEST_GB, days=FREE_TEST_DAYS, service=service)
     if not result["ok"]:
         await q.message.reply_text(tr(uid, "trial_error"), reply_markup=menu(uid))
         return
@@ -1338,7 +1331,7 @@ async def trial_service(update, context):
         or ""
     )
     db.set_trial_used(uid, service)
-    await q.message.reply_text(tr(uid, "trial_success", config=config or "Panel API did not return connection details."), reply_markup=menu(uid))
+    await q.message.reply_text(tr(uid, "trial_success", service=TEXT[lang(uid)][service], config=config or "Panel API did not return connection details."), reply_markup=menu(uid))
 
 
 def run_bot():

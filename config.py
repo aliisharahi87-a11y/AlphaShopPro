@@ -3,61 +3,65 @@ from dotenv import load_dotenv
 
 load_dotenv()
 
-BOT_TOKEN = os.getenv("BOT_TOKEN", "").strip()
-ADMIN_IDS = [int(x.strip()) for x in os.getenv("ADMIN_IDS", "").split(",") if x.strip().isdigit()]
-REQUIRED_CHANNEL = os.getenv("REQUIRED_CHANNEL", "@alphashopss").strip()
-SUPPORT_USERNAME = os.getenv("SUPPORT_USERNAME", "@AlphaShopSupport").strip()
-CARD_NUMBER = os.getenv("CARD_NUMBER", "").strip()
-CARD_HOLDER = os.getenv("CARD_HOLDER", "").strip()
+def _s(name, default=""):
+    return os.getenv(name, default).strip()
 
-CUSTOM_PRICE_PER_GB = int(os.getenv("CUSTOM_PRICE_PER_GB", "4000"))
-REFERRAL_PERCENT = int(os.getenv("REFERRAL_PERCENT", "10"))
-DATABASE_FILE = os.getenv("DATABASE_FILE", "alphashop.db")
+def _i(name, default):
+    try:
+        return int(_s(name, str(default)))
+    except ValueError:
+        return default
 
-# Service prices (Toman / GB)
-GOLD_PRICE_PER_GB = int(os.getenv("GOLD_PRICE_PER_GB", "5000"))
-SILVER_PRICE_PER_GB = int(os.getenv("SILVER_PRICE_PER_GB", "3000"))
-BRONZE_PRICE_PER_GB = int(os.getenv("BRONZE_PRICE_PER_GB", "1000"))
+def _f(name, default):
+    try:
+        return float(_s(name, str(default)))
+    except ValueError:
+        return default
 
-# Panel URLs and admin credentials
-# Gold: Pasargard panel
-PANEL_URL = os.getenv("PANEL_URL", "").strip().rstrip("/")
-PANEL_USERNAME = os.getenv("PANEL_USERNAME", "").strip()
-PANEL_PASSWORD = os.getenv("PANEL_PASSWORD", "").strip()
+BOT_TOKEN = _s("BOT_TOKEN")
+ADMIN_IDS = [int(x.strip()) for x in _s("ADMIN_IDS").split(",") if x.strip().isdigit()]
+REQUIRED_CHANNEL = _s("REQUIRED_CHANNEL")
+SUPPORT_USERNAME = _s("SUPPORT_USERNAME")
+CARD_NUMBER = _s("CARD_NUMBER")
+CARD_HOLDER = _s("CARD_HOLDER")
+CUSTOM_PRICE_PER_GB = _i("CUSTOM_PRICE_PER_GB", 4000)
+REFERRAL_PERCENT = _i("REFERRAL_PERCENT", 10)
+DATABASE_FILE = _s("DATABASE_FILE", "alphashop.db")
 
-GOLD_PANEL_URL = os.getenv("GOLD_PANEL_URL", PANEL_URL).strip().rstrip("/")
-GOLD_PANEL_USERNAME = os.getenv("GOLD_PANEL_USERNAME", PANEL_USERNAME).strip()
-GOLD_PANEL_PASSWORD = os.getenv("GOLD_PANEL_PASSWORD", PANEL_PASSWORD).strip()
+# Legacy/default Pasargard panel. Kept for backward compatibility.
+PANEL_URL = _s("PANEL_URL").rstrip("/")
+PANEL_USERNAME = _s("PANEL_USERNAME")
+PANEL_PASSWORD = _s("PANEL_PASSWORD")
+PANEL_API_TOKEN = _s("PANEL_API_TOKEN")
 
-# Silver: new Marzban panel
-SILVER_PANEL_URL = os.getenv("SILVER_PANEL_URL", "https://pan.linkesubs.com").strip().rstrip("/")
-SILVER_PANEL_USERNAME = os.getenv("SILVER_PANEL_USERNAME", "").strip()
-SILVER_PANEL_PASSWORD = os.getenv("SILVER_PANEL_PASSWORD", "").strip()
+# Gold = Pasargard
+GOLD_PANEL_URL = _s("GOLD_PANEL_URL", PANEL_URL).rstrip("/")
+GOLD_PANEL_USERNAME = _s("GOLD_PANEL_USERNAME", PANEL_USERNAME)
+GOLD_PANEL_PASSWORD = _s("GOLD_PANEL_PASSWORD", PANEL_PASSWORD)
+GOLD_PRICE_PER_GB = _i("GOLD_PRICE_PER_GB", 5000)
 
-# Optional aliases for the old naming used in previous deployments.
-SILVER_PANEL_URL_NEW = os.getenv("SILVER_PANEL_URL_NEW", SILVER_PANEL_URL).strip().rstrip("/")
-SILVER_PANEL_USERNAME_NEW = os.getenv("SILVER_PANEL_USERNAME_NEW", SILVER_PANEL_USERNAME).strip()
-SILVER_PANEL_PASSWORD_NEW = os.getenv("SILVER_PANEL_PASSWORD_NEW", SILVER_PANEL_PASSWORD).strip()
-SILVER_VLESS_FLOW = os.getenv("SILVER_VLESS_FLOW", "").strip()
+# Silver = Marzban
+SILVER_PANEL_URL = _s("SILVER_PANEL_URL", "https://pan.linkesubs.com").rstrip("/")
+SILVER_PANEL_USERNAME = _s("SILVER_PANEL_USERNAME")
+SILVER_PANEL_PASSWORD = _s("SILVER_PANEL_PASSWORD")
+SILVER_PRICE_PER_GB = _i("SILVER_PRICE_PER_GB", 3000)
+SILVER_INBOUND_NAME = _s("SILVER_INBOUND_NAME")
+SILVER_PROTOCOL = _s("SILVER_PROTOCOL", "vless").lower()
+SILVER_VLESS_FLOW = _s("SILVER_VLESS_FLOW")
+SILVER_SHADOWSOCKS_METHOD = _s("SILVER_SHADOWSOCKS_METHOD", "chacha20-ietf-poly1305")
 
-# Bronze: old Silver Pasargard panel
-BRONZE_PANEL_URL = os.getenv("BRONZE_PANEL_URL", "").strip().rstrip("/")
-BRONZE_PANEL_USERNAME = os.getenv("BRONZE_PANEL_USERNAME", "").strip()
-BRONZE_PANEL_PASSWORD = os.getenv("BRONZE_PANEL_PASSWORD", "").strip()
+# Bronze = old Pasargard / old Silver panel
+BRONZE_PANEL_URL = _s("BRONZE_PANEL_URL").rstrip("/")
+BRONZE_PANEL_USERNAME = _s("BRONZE_PANEL_USERNAME")
+BRONZE_PANEL_PASSWORD = _s("BRONZE_PANEL_PASSWORD")
+BRONZE_PRICE_PER_GB = _i("BRONZE_PRICE_PER_GB", 1000)
 
-# Backward-compatible API token field; normal provisioning uses admin token login.
-PANEL_API_TOKEN = os.getenv("PANEL_API_TOKEN", "").strip()
-PANEL_API_URL = os.getenv("PANEL_API_URL", "").strip().rstrip("/")
-PANEL_API_CREATE_USER_PATH = os.getenv("PANEL_API_CREATE_USER_PATH", "").strip()
-
-# Free trial: 150 MB for 1 day, independently available on each service.
-FREE_TEST_ENABLED = os.getenv("FREE_TEST_ENABLED", "True").strip().lower() == "true"
-FREE_TEST_GB = float(os.getenv("FREE_TEST_GB", "0.15"))
-FREE_TEST_DAYS = int(os.getenv("FREE_TEST_DAYS", "1"))
-FREE_TEST_GROUP_ID = int(os.getenv("FREE_TEST_GROUP_ID", "1"))
-
-DEFAULT_GROUP_ID = int(os.getenv("DEFAULT_GROUP_ID", "1"))
-DEFAULT_HWID_LIMIT = int(os.getenv("DEFAULT_HWID_LIMIT", "0"))
-DEFAULT_STATUS = os.getenv("DEFAULT_STATUS", "active").strip() or "active"
-SHADOWSOCKS_METHOD = os.getenv("SHADOWSOCKS_METHOD", "chacha20-ietf-poly1305").strip()
-LOG_LEVEL = os.getenv("LOG_LEVEL", "INFO").strip()
+FREE_TEST_ENABLED = _s("FREE_TEST_ENABLED", "True").lower() == "true"
+FREE_TEST_GB = _f("FREE_TEST_GB", 0.15)
+FREE_TEST_DAYS = _i("FREE_TEST_DAYS", 1)
+FREE_TEST_GROUP_ID = _i("FREE_TEST_GROUP_ID", 1)
+DEFAULT_GROUP_ID = _i("DEFAULT_GROUP_ID", 1)
+DEFAULT_HWID_LIMIT = _i("DEFAULT_HWID_LIMIT", 0)
+DEFAULT_STATUS = _s("DEFAULT_STATUS", "active") or "active"
+SHADOWSOCKS_METHOD = _s("SHADOWSOCKS_METHOD", "chacha20-ietf-poly1305")
+LOG_LEVEL = _s("LOG_LEVEL", "INFO")

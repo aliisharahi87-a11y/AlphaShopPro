@@ -108,66 +108,35 @@ def init_db():
             except sqlite3.OperationalError:
                 pass
 
-        # Existing plans are Gold by default when service was not set.
-        c.execute("UPDATE plans SET service='gold' WHERE service IS NULL OR service=''" )
+        # Keep existing data, but normalize service plans for the three-service setup.
+        c.execute("UPDATE plans SET service='gold' WHERE service IS NULL OR service=''")
 
-        # Keep only the requested paid plans: 5/10/20/40 GB. Unlimited is disabled.
+        # No Unlimited plan in the new shop.
         c.execute("UPDATE plans SET active=0 WHERE unlimited=1")
 
-        # Normalize existing Gold prices to 5,000 Toman/GB while preserving IDs.
-        gold_prices = {5: 5000, 10: 10000, 20: 20000, 40: 40000}
-        for gb, price in gold_prices.items():
-            c.execute(
-                "UPDATE plans SET price=?, unlimited=0, active=1 WHERE service='gold' AND gb=?",
-                (price, gb),
-            )
+        def ensure_service(service, price_per_gb, fa_suffix, en_suffix):
+            rows = c.execute("SELECT id,gb FROM plans WHERE service=? AND unlimited=0", (service,)).fetchall()
+            existing_gb = {int(r['gb']) for r in rows if r['gb'] is not None}
+            plans_to_add = []
+            for order, gb in enumerate((5, 10, 20, 40), 1):
+                if gb not in existing_gb:
+                    plans_to_add.append((f"{gb} گیگ {fa_suffix}".strip(), f"{gb} GB {en_suffix}".strip(), gb, gb * price_per_gb, 0, 1, order, service))
+            if plans_to_add:
+                c.executemany(
+                    """INSERT INTO plans(title_fa,title_en,gb,price,unlimited,active,sort_order,service)
+                       VALUES(?,?,?,?,?,?,?,?)""", plans_to_add
+                )
+            for gb in (5, 10, 20, 40):
+                c.execute(
+                    "UPDATE plans SET price=?, active=1 WHERE service=? AND gb=? AND unlimited=0",
+                    (gb * price_per_gb, service, gb),
+                )
 
-        if c.execute("SELECT COUNT(*) FROM plans WHERE service='gold' AND gb IN (5,10,20,40)").fetchone()[0] < 4:
-            existing = {r['gb'] for r in c.execute("SELECT gb FROM plans WHERE service='gold'").fetchall()}
-            rows=[]
-            for gb, price in gold_prices.items():
-                if gb not in existing:
-                    rows.append((f"{gb} گیگ Gold", f"{gb} GB Gold", gb, price, 0, 1, gb, 'gold'))
-            if rows:
-                c.executemany("""INSERT INTO plans
-                    (title_fa,title_en,gb,price,unlimited,active,sort_order,service)
-                    VALUES(?,?,?,?,?,?,?,?)""", rows)
+        # Existing Gold plans are retained but their prices are normalized to 5,000/GB.
+        ensure_service('gold', 5000, 'Gold', 'Gold')
+        ensure_service('silver', 3000, 'Silver', 'Silver')
+        ensure_service('bronze', 1000, 'Bronze', 'Bronze')
 
-        # Silver: 3,000 Toman/GB.
-        silver_prices = {5: 15000, 10: 30000, 20: 60000, 40: 120000}
-        for gb, price in silver_prices.items():
-            c.execute(
-                "UPDATE plans SET price=?, unlimited=0, active=1 WHERE service='silver' AND gb=?",
-                (price, gb),
-            )
-        if c.execute("SELECT COUNT(*) FROM plans WHERE service='silver' AND gb IN (5,10,20,40)").fetchone()[0] < 4:
-            existing = {r['gb'] for r in c.execute("SELECT gb FROM plans WHERE service='silver'").fetchall()}
-            rows=[]
-            for gb, price in silver_prices.items():
-                if gb not in existing:
-                    rows.append((f"{gb} گیگ Silver", f"{gb} GB Silver", gb, price, 0, 1, gb, 'silver'))
-            if rows:
-                c.executemany("""INSERT INTO plans
-                    (title_fa,title_en,gb,price,unlimited,active,sort_order,service)
-                    VALUES(?,?,?,?,?,?,?,?)""", rows)
-
-        # Bronze: 1,000 Toman/GB, backed by the old Silver Pasargard panel.
-        bronze_prices = {5: 5000, 10: 10000, 20: 20000, 40: 40000}
-        for gb, price in bronze_prices.items():
-            c.execute(
-                "UPDATE plans SET price=?, unlimited=0, active=1 WHERE service='bronze' AND gb=?",
-                (price, gb),
-            )
-        if c.execute("SELECT COUNT(*) FROM plans WHERE service='bronze' AND gb IN (5,10,20,40)").fetchone()[0] < 4:
-            existing = {r['gb'] for r in c.execute("SELECT gb FROM plans WHERE service='bronze'").fetchall()}
-            rows=[]
-            for gb, price in bronze_prices.items():
-                if gb not in existing:
-                    rows.append((f"{gb} گیگ Bronze", f"{gb} GB Bronze", gb, price, 0, 1, gb, 'bronze'))
-            if rows:
-                c.executemany("""INSERT INTO plans
-                    (title_fa,title_en,gb,price,unlimited,active,sort_order,service)
-                    VALUES(?,?,?,?,?,?,?,?)""", rows)
 
 
 def upsert_user(u, referrer=None):
@@ -488,12 +457,7 @@ def add_balance(uid, amount, description="Admin balance"):
         )
 
 def has_used_trial(uid, service="gold"):
-    service = (service or "gold").lower()
-    column = {
-        "gold": "trial_gold_used",
-        "silver": "trial_silver_used",
-        "bronze": "trial_bronze_used",
-    }.get(service, "trial_gold_used")
+    column = {"gold":"trial_gold_used", "silver":"trial_silver_used", "bronze":"trial_bronze_used"}.get(service, "trial_gold_used")
     with conn() as c:
         row = c.execute(f"SELECT {column}, trial_used FROM users WHERE id=?", (uid,)).fetchone()
         if not row:
@@ -502,28 +466,15 @@ def has_used_trial(uid, service="gold"):
 
 
 def set_trial_used(uid, service="gold"):
-    service = (service or "gold").lower()
-    column = {
-        "gold": "trial_gold_used",
-        "silver": "trial_silver_used",
-        "bronze": "trial_bronze_used",
-    }.get(service, "trial_gold_used")
+    column = {"gold":"trial_gold_used", "silver":"trial_silver_used", "bronze":"trial_bronze_used"}.get(service, "trial_gold_used")
     with conn() as c:
         c.execute(f"UPDATE users SET {column}=1 WHERE id=?", (uid,))
         if service == "gold":
             c.execute("UPDATE users SET trial_used=1 WHERE id=?", (uid,))
 
 
-def reset_trial(uid, service=None):
+def reset_trial(uid):
     with conn() as c:
-        if service:
-            service = service.lower()
-            column = {"gold":"trial_gold_used", "silver":"trial_silver_used", "bronze":"trial_bronze_used"}.get(service)
-            if column:
-                c.execute(f"UPDATE users SET {column}=0 WHERE id=?", (uid,))
-                if service == "gold":
-                    c.execute("UPDATE users SET trial_used=0 WHERE id=?", (uid,))
-                return
         c.execute(
             "UPDATE users SET trial_used=0, trial_gold_used=0, trial_silver_used=0, trial_bronze_used=0 WHERE id=?",
             (uid,),
