@@ -258,6 +258,32 @@ async def _create_marzban(session, username, gb, days):
     return merged, connection
 
 
+async def _get_pasargard_subscription_links(session, panel_url, headers, created_data, username):
+    """Fallback used by Gold/Bronze Pasargard when /api/user does not include a link."""
+    candidates = []
+    user_id = None
+    if isinstance(created_data, dict):
+        user_id = created_data.get("id") or created_data.get("user_id") or created_data.get("userId")
+        nested = created_data.get("data")
+        if isinstance(nested, dict):
+            user_id = user_id or nested.get("id") or nested.get("user_id")
+    if user_id is not None:
+        candidates.append(f"{panel_url}/api/user/{user_id}/subscription/links")
+    candidates.append(f"{panel_url}/api/user/{username}/subscription/links")
+    for url in candidates:
+        try:
+            async with session.get(url, headers=headers) as r:
+                data = await _json(r)
+                print(f"🔗 PASARGARD SUB LINKS HTTP {r.status} -> {url}")
+                if r.status == 200:
+                    link = _first_url(data)
+                    if link:
+                        return link
+        except (aiohttp.ClientError, asyncio.TimeoutError) as exc:
+            print(f"⚠️ PASARGARD SUB LINKS FAILED: {exc!r}")
+    return ""
+
+
 async def _create_pasargard(session, username, gb, unlimited, days, service):
     panel_url, panel_user, panel_pass = _cfg(service)
     if not panel_url:
@@ -294,12 +320,19 @@ async def _create_pasargard(session, username, gb, unlimited, days, service):
         if r.status not in (200,201):
             raise RuntimeError(f'{service.title()} create HTTP {r.status}: {data}')
     connection = _first_url(data)
+    user_data = {}
     if not connection:
         async with session.get(f'{panel_url}/api/user/{username}', headers=headers) as r:
             user_data = await _json(r)
             connection = _first_url(user_data)
             if isinstance(user_data, dict):
                 data = {**(data if isinstance(data,dict) else {}), 'user':user_data}
+    # Keep the old working Gold/Bronze fallback: many Pasargard versions
+    # return the subscription only from /subscription/links.
+    if not connection:
+        connection = await _get_pasargard_subscription_links(
+            session, panel_url, headers, data if isinstance(data, dict) else {}, str(username).strip()
+        )
     if not connection:
         raise RuntimeError(f'{service.title()} user created but no connection link returned: {data}')
     return data, connection
