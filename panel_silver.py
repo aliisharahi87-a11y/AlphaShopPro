@@ -36,7 +36,22 @@ async def _json(response):
 def _first_url(obj):
     if isinstance(obj, str):
         s = obj.strip()
-        return s if s.startswith(("http://", "https://", "vless://", "vmess://", "trojan://", "ss://")) else ""
+        if not s:
+            return ""
+
+        # Connection/subscription protocols: keep exactly as returned.
+        if s.startswith(("vless://", "vmess://", "trojan://", "ss://")):
+            return s
+
+        # Web URL: add https:// only when it is missing.
+        if s.startswith("https://") or s.startswith("http://"):
+            return s
+
+        # Bare domain/path returned by Marzban.
+        if s.startswith(("pan.", "www.", "localhost", "127.0.0.1")) or "." in s.split("/")[0]:
+            return "https://" + s.lstrip("/")
+
+        return ""
     if isinstance(obj, dict):
         for k in ("subscription_url", "subscriptionUrl", "sub_url", "subUrl", "link", "url"):
             v = obj.get(k)
