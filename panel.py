@@ -8,6 +8,13 @@ async def create_customer(username, gb, unlimited=False, days=30, group_ids=None
         return await create_gold_customer(username, gb, unlimited, days, group_ids, note)
     if service == "silver":
         result = await create_silver_customer(username, gb, unlimited, days, group_ids, note)
+        if result.get("subscription_url"):
+            url = str(result["subscription_url"]).strip()
+            while url.startswith("https://"):
+                url = url[8:]
+            while url.startswith("http://"):
+                url = url[7:]
+            result["subscription_url"] = "https://" + url
         if result.get("subscription_url") and not result["subscription_url"].startswith(("http://", "https://")):
             result["subscription_url"] = "https://" + result["subscription_url"]
         return result
