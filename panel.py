@@ -7,7 +7,10 @@ async def create_customer(username, gb, unlimited=False, days=30, group_ids=None
     if service == "gold":
         return await create_gold_customer(username, gb, unlimited, days, group_ids, note)
     if service == "silver":
-        return await create_silver_customer(username, gb, unlimited, days, group_ids, note)
+        result = await create_silver_customer(username, gb, unlimited, days, group_ids, note)
+        if result.get("subscription_url") and not result["subscription_url"].startswith(("http://", "https://")):
+            result["subscription_url"] = "https://" + result["subscription_url"]
+        return result
     if service == "bronze":
         return await create_bronze_customer(username, gb, unlimited, days, group_ids, note)
     return {"ok": False, "data": {"error": f"Unknown service: {service}"}, "subscription_url":"", "connection_details":"", "config":""}
