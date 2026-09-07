@@ -180,6 +180,10 @@ async def create_customer(username, gb, unlimited=False, days=30, group_ids=None
             while connection.startswith("http:/"):
                 connection = connection[6:]
             connection = "https://" + connection.lstrip("/")
+            if connection.startswith("https:///sub/"):
+                connection = "https://pan.linkesubs.com/sub/" + connection.split("/sub/", 1)[1]
+            elif connection.startswith("https://sub/"):
+                connection = "https://pan.linkesubs.com/sub/" + connection.split("https://sub/", 1)[1]
 
             merged["subscription_url"] = connection
             merged["protocol_used"] = protocol
