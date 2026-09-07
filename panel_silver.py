@@ -173,6 +173,14 @@ async def create_customer(username, gb, unlimited=False, days=30, group_ids=None
             if not connection: raise RuntimeError(f"Marzban user created but no subscription_url returned: {user_data}")
             merged = dict(data) if isinstance(data, dict) else {"response": data}
             if isinstance(user_data, dict): merged["user"] = user_data
+            # Silver subscription URL: force exactly one https://
+            connection = str(connection or "").strip()
+            while connection.startswith("https:/"):
+                connection = connection[7:]
+            while connection.startswith("http:/"):
+                connection = connection[6:]
+            connection = "https://" + connection.lstrip("/")
+
             merged["subscription_url"] = connection
             merged["protocol_used"] = protocol
             return {"ok": True, "data": merged, "username": str(username).strip(), "subscription_url": connection, "connection_details": connection, "config": connection}
