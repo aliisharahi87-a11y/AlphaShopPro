@@ -7,7 +7,7 @@ from pathlib import Path
 import qrcode
 from PIL import Image
 
-from telegram import Update, InlineKeyboardButton, InlineKeyboardMarkup, ReplyKeyboardMarkup, KeyboardButton
+from telegram import ReactionTypeEmoji, Update, InlineKeyboardButton, InlineKeyboardMarkup, ReplyKeyboardMarkup, KeyboardButton
 from telegram.ext import (
     Application,
     CallbackQueryHandler,
@@ -530,11 +530,14 @@ async def deposit_receipt(update, context):
     rid = db.add_deposit(uid, amount, receipt)
 
     try:
-        await update.message.set_reaction(
-            reaction=[{"type": "emoji", "emoji": "❤️"}]
+        await context.bot.set_message_reaction(
+            chat_id=update.effective_chat.id,
+            message_id=update.message.message_id,
+            reaction=[ReactionTypeEmoji(emoji="❤")],
         )
     except Exception as e:
         print(f"❌ Receipt reaction failed: {e}")
+
     context.user_data.clear()
 
     await update.message.reply_text(
