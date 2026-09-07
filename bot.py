@@ -1,4 +1,11 @@
 import asyncio
+import html
+import io
+import os
+from pathlib import Path
+
+import qrcode
+from PIL import Image
 
 from telegram import Update, InlineKeyboardButton, InlineKeyboardMarkup, ReplyKeyboardMarkup, KeyboardButton
 from telegram.ext import (
@@ -13,7 +20,7 @@ from telegram.ext import (
 
 from config import *
 import database as db
-from panel import create_customer
+from panel import create_customer, extend_customer, get_customer_info
 
 
 DEP_AMOUNT, DEP_RECEIPT, CUSTOM_GB, COUPON_INPUT = range(4)
@@ -26,10 +33,16 @@ TEXT = {
         "join": "📢 عضویت در کانال",
         "check": "✅ بررسی عضویت",
         "buy": "🛒 خرید سرویس",
+        "renew": "🔄 تمدید سرویس",
         "trial": "🎁 تست رایگان",
+        "renew_choose": "🔄 سرویس موردنظر برای تمدید را انتخاب کنید:",
+        "renew_none": "❌ سرویس فعالی برای تمدید پیدا نشد.",
+        "renew_confirm": "🔄 <b>تمدید سرویس</b>\n\n🧾 سفارش: #{oid}\n🔌 سرویس: {service}\n📦 حجم: {gb}\n💰 هزینه تمدید: {price:,} تومان\n📅 مدت تمدید: {days} روز\n\nبرای ادامه روی تأیید بزنید.",
+        "renew_ok": "✅ سرویس شما با موفقیت {days} روز تمدید شد.",
+        "renew_error": "❌ تمدید سرویس انجام نشد و مبلغی از کیف پول شما کسر نشد.",
         "wallet": "💰 کیف پول",
         "refs": "👥 زیرمجموعه‌گیری",
-        "orders": "📦 سفارش‌های من",
+        "orders": "🟣 سفارش‌های فعال",
         "support": "📞 پشتیبانی",
         "settings": "⚙️ تنظیمات",
         "guide": "📚 راهنما",
@@ -75,7 +88,14 @@ TEXT = {
                       "7️⃣ در صورت فعال بودن API پنل، سرویس به‌صورت خودکار ساخته و اطلاعات اتصال ارسال می‌شود.\n\n"
                       "💡 در صورت هرگونه مشکل، با پشتیبانی در ارتباط باشید.",
         "admin_only": "⛔ این بخش فقط برای مدیران است.",
+        "broadcast_start": "📢 پیام همگانی\n\nپیامی که می‌خواهید برای همه کاربران ارسال شود را همین‌جا بفرستید.\nبرای لغو /cancelbroadcast را بزنید.",
+        "broadcast_done": "✅ پیام همگانی ارسال شد.\n\nموفق: {ok}\nناموفق: {fail}",
         "trial": "🎁 تست رایگان",
+        "renew_choose": "🔄 سرویس موردنظر برای تمدید را انتخاب کنید:",
+        "renew_none": "❌ سرویس فعالی برای تمدید پیدا نشد.",
+        "renew_confirm": "🔄 <b>تمدید سرویس</b>\n\n🧾 سفارش: #{oid}\n🔌 سرویس: {service}\n📦 حجم: {gb}\n💰 هزینه تمدید: {price:,} تومان\n📅 مدت تمدید: {days} روز\n\nبرای ادامه روی تأیید بزنید.",
+        "renew_ok": "✅ سرویس شما با موفقیت {days} روز تمدید شد.",
+        "renew_error": "❌ تمدید سرویس انجام نشد و مبلغی از کیف پول شما کسر نشد.",
         "trial_used": "❌ شما قبلاً از تست رایگان استفاده کرده‌اید.",
         "trial_success": "🎉 تست رایگان {service} شما فعال شد.\n\n📦 حجم: ۱۵۰ مگابایت\n📅 اعتبار: ۱ روز\n\n🔗 لینک اشتراک:\n{config}",
         "trial_error": "❌ ساخت تست رایگان با خطا مواجه شد.",
@@ -87,10 +107,16 @@ TEXT = {
         "join": "📢 Join Channel",
         "check": "✅ Check Membership",
         "buy": "🛒 Buy Service",
+        "renew": "🔄 Renew Service",
         "trial": "🎁 Free Trial",
+        "renew_choose": "🔄 Choose the service to renew:",
+        "renew_none": "❌ No completed service is available for renewal.",
+        "renew_confirm": "🔄 <b>Service Renewal</b>\n\n🧾 Order: #{oid}\n🔌 Service: {service}\n📦 Volume: {gb}\n💰 Renewal cost: {price:,} Toman\n📅 Renewal period: {days} days\n\nTap confirm to continue.",
+        "renew_ok": "✅ Your service was renewed for {days} days.",
+        "renew_error": "❌ Renewal failed. No amount was deducted from your wallet.",
         "wallet": "💰 Wallet",
         "refs": "👥 Referrals",
-        "orders": "📦 My Orders",
+        "orders": "🟣 Active Services",
         "support": "📞 Support",
         "settings": "⚙️ Settings",
         "guide": "📚 Guide",
@@ -136,6 +162,8 @@ TEXT = {
                       "7️⃣ If the panel API is configured, the customer is created automatically and connection details are sent.\n\n"
                       "💡 Contact support if you need help.",
         "admin_only": "⛔ This section is for administrators only.",
+        "broadcast_start": "📢 Broadcast\n\nSend the message you want to deliver to all users here.\nUse /cancelbroadcast to cancel.",
+        "broadcast_done": "✅ Broadcast completed.\n\nSuccessful: {ok}\nFailed: {fail}",
         "trial": "🎁 Free Trial",
         "trial_used": "❌ You have already used your free trial.",
         "trial_success": "🎉 Your {service} free trial has been activated.\n\n📦 Volume: 150 MB\n📅 Validity: 1 day\n\n🔗 Subscription:\n{config}",
@@ -143,6 +171,51 @@ TEXT = {
     },
 }
 
+
+
+QR_TEMPLATE = Path(__file__).resolve().parent / "assets" / "connection_qr_template.jpeg"
+
+
+def build_connection_image(connection):
+    """Create the customer card using the supplied template and place only the QR in the white panel."""
+    if not connection:
+        return None
+    qr = qrcode.QRCode(version=None, error_correction=qrcode.constants.ERROR_CORRECT_M, box_size=10, border=4)
+    qr.add_data(str(connection))
+    qr.make(fit=True)
+    qr_img = qr.make_image(fill_color="black", back_color="white").convert("RGB")
+    base = Image.open(QR_TEMPLATE).convert("RGB")
+    # The white panel in the 1536x1536 Alpha Shop template is centered around this area.
+    target = 610
+    qr_img = qr_img.resize((target, target), Image.Resampling.LANCZOS)
+    x = (base.width - qr_img.width) // 2
+    y = 330
+    base.paste(qr_img, (x, y))
+    out = io.BytesIO()
+    out.name = "alpha_shop_connection.jpg"
+    base.save(out, format="JPEG", quality=95, subsampling=0)
+    out.seek(0)
+    return out
+
+
+def connection_caption(uid, title, connection, extra_lines=None):
+    lines = [title]
+    if extra_lines:
+        lines.extend(extra_lines)
+    lines.extend(["", ui(uid, "🔗 اطلاعات اتصال:", "🔗 Connection information:"), str(connection)])
+    return html.escape("\n".join(lines))
+
+
+async def send_connection_card(message, uid, title, connection, extra_lines=None, reply_markup=None):
+    if not connection:
+        await message.reply_text(title + "\n\n" + ui(uid, "❌ اطلاعات اتصال از پنل دریافت نشد.", "❌ Connection information could not be retrieved from the panel."), reply_markup=reply_markup)
+        return
+    image = build_connection_image(connection)
+    caption = connection_caption(uid, title, connection, extra_lines)
+    if len(caption) > 1024:
+        # Telegram captions are limited; keep the full link but shorten optional metadata first.
+        caption = html.escape(title + "\n\n" + ui(uid, "🔗 اطلاعات اتصال:", "🔗 Connection information:") + "\n" + str(connection))
+    await message.reply_photo(photo=image, caption=caption, parse_mode="HTML", reply_markup=reply_markup)
 
 def lang(uid):
     u = db.get_user(uid)
@@ -153,15 +226,20 @@ def tr(uid, key, **kwargs):
     return TEXT[lang(uid)][key].format(**kwargs)
 
 
+def ui(uid, fa_text, en_text):
+    return fa_text if lang(uid) == "fa" else en_text
+
+
 def menu(uid):
     # Telegram supports colored reply-keyboard buttons on recent clients.
     return ReplyKeyboardMarkup(
         [
-            [KeyboardButton(tr(uid, "buy"), style="primary")],
-            [KeyboardButton(tr(uid, "trial"), style="success"), KeyboardButton(tr(uid, "wallet"), style="primary")],
-            [KeyboardButton(tr(uid, "refs")), KeyboardButton(tr(uid, "orders"))],
-            [KeyboardButton(tr(uid, "support")), KeyboardButton(tr(uid, "settings"))],
-            [KeyboardButton(tr(uid, "guide"))],
+            [KeyboardButton(tr(uid, "buy"), style="danger")],
+            [KeyboardButton(tr(uid, "renew"), style="danger"), KeyboardButton(tr(uid, "trial"), style="success")],
+            [KeyboardButton(tr(uid, "wallet"), style="primary")],
+            [KeyboardButton(tr(uid, "refs"), style="primary"), KeyboardButton(tr(uid, "orders"), style="success")],
+            [KeyboardButton(tr(uid, "support"), style="primary"), KeyboardButton(tr(uid, "settings"), style="primary")],
+            [KeyboardButton(tr(uid, "guide"), style="primary")],
         ],
         resize_keyboard=True,
     )
@@ -506,7 +584,7 @@ async def shop_service(update, context):
     rows = []
     for p in db.plans(service=service):
         title = (f"{int(p['gb'])} GB" if p["gb"] is not None else "نامحدود") if lang(uid) == "fa" else (f"{int(p['gb'])} GB" if p["gb"] is not None else "Unlimited")
-        price = "" if p["unlimited"] else f"{p['price']:,} تومان"
+        price = "" if p["unlimited"] else (f"{p['price']:,} Toman" if lang(uid) == "en" else f"{p['price']:,} تومان")
         rows.append([InlineKeyboardButton(
             f"{title} — {price}",
             callback_data=f"buy:{service}:{p['id']}",
@@ -539,12 +617,12 @@ async def buy(update, context):
         else:
             service, pid = "gold", int(parts[1])
     except (ValueError, IndexError):
-        await query.message.reply_text("❌ سرویس نامعتبر است.")
+        await query.message.reply_text(ui(uid, "❌ سرویس نامعتبر است.", "❌ Invalid service."))
         return
 
     p = db.get_plan(pid)
     if not p or not p["active"] or p["service"] != service:
-        await query.message.reply_text("❌ این سرویس در دسترس نیست.")
+        await query.message.reply_text(ui(uid, "❌ این سرویس در دسترس نیست.", "❌ This service is unavailable."))
         return
 
     coupon = context.user_data.get("coupon")
@@ -763,7 +841,7 @@ async def coupon_input(update, context):
         "🏠 منوی اصلی", "🛒 فروشگاه", "💰 کیف پول",
         "👤 حساب کاربری", "👥 زیرمجموعه‌گیری", "📞 پشتیبانی",
         "⚙️ تنظیمات", "📚 راهنما", "🛒 خرید سرویس",
-        "📦 سفارش‌های من", "🎁 تست رایگان",
+        "🟣 سفارش‌های فعال", "🎁 تست رایگان",
         "🏠 MAIN MENU", "🛒 SHOP", "💰 WALLET",
         "👤 ACCOUNT", "👥 REFERRALS", "📞 SUPPORT",
         "⚙️ SETTINGS", "📚 GUIDE", "🛒 BUY SERVICE",
@@ -792,7 +870,7 @@ async def coupon_input(update, context):
     if not coupon:
         await update.message.reply_text(
             tr(uid, "coupon_bad") +
-            "\n\n🔄 لطفاً یک کد تخفیف معتبر وارد کنید.",
+            ui(uid, "\n\n🔄 لطفاً یک کد تخفیف معتبر وارد کنید.", "\n\n🔄 Please enter a valid coupon code."),
             reply_markup=menu(uid),
         )
         return COUPON_INPUT
@@ -800,7 +878,7 @@ async def coupon_input(update, context):
     if coupon["max_uses"] and coupon["used"] >= coupon["max_uses"]:
         await update.message.reply_text(
             tr(uid, "coupon_bad") +
-            "\n\n🔄 ظرفیت استفاده از این کد تمام شده است.",
+            ui(uid, "\n\n🔄 ظرفیت استفاده از این کد تمام شده است.", "\n\n🔄 This coupon has reached its usage limit."),
             reply_markup=menu(uid),
         )
         return COUPON_INPUT
@@ -808,8 +886,7 @@ async def coupon_input(update, context):
     has_used = getattr(db, "has_coupon_used", None)
     if has_used and has_used(code, uid):
         await update.message.reply_text(
-            "❌ شما قبلاً از این کد تخفیف استفاده کرده‌اید.\n\n"
-            "🔄 لطفاً کد دیگری وارد کنید.",
+            ui(uid, "❌ شما قبلاً از این کد تخفیف استفاده کرده‌اید.\n\n🔄 لطفاً کد دیگری وارد کنید.", "❌ You have already used this coupon.\n\n🔄 Please use another coupon."),
             reply_markup=menu(uid),
         )
         return COUPON_INPUT
@@ -853,14 +930,14 @@ async def _complete_pending_purchase(update, context):
     pending = context.user_data.get("pending_purchase")
 
     if not pending:
-        await query.answer("❌ سفارش منقضی شده است.", show_alert=True)
+        await query.answer(ui(uid, "❌ سفارش منقضی شده است.", "❌ This order has expired."), show_alert=True)
         return
 
     await query.answer()
 
     u = db.get_user(uid)
     if not u:
-        await query.message.reply_text("❌ حساب کاربری پیدا نشد.")
+        await query.message.reply_text(ui(uid, "❌ حساب کاربری پیدا نشد.", "❌ User account not found."))
         context.user_data.pop("pending_purchase", None)
         return
 
@@ -940,18 +1017,20 @@ async def _complete_pending_purchase(update, context):
     context.user_data.pop("coupon", None)
     context.user_data.pop("coupon_code", None)
 
-    await query.message.reply_text(
-        tr(
-            uid,
-            "order_success",
-            oid=oid,
-            gb="Unlimited" if unlimited else f"{gb} GB",
-            price=price,
-            username=final_username,
-            config=config or "Panel API did not return connection details.",
-        ),
-        reply_markup=menu(uid),
+    title = (
+        f"🎉 سفارش شما با موفقیت ثبت شد!\n\n"
+        f"🧾 شماره سفارش: #{oid}\n"
+        f"📦 حجم: {'Unlimited' if unlimited else str(gb) + ' GB'}\n"
+        f"💰 مبلغ: {price:,} تومان\n"
+        f"👤 نام کاربری: {final_username}"
+    ) if lang(uid) == "fa" else (
+        f"🎉 Your order was completed successfully!\n\n"
+        f"🧾 Order: #{oid}\n"
+        f"📦 Volume: {'Unlimited' if unlimited else str(gb) + ' GB'}\n"
+        f"💰 Amount: {price:,} Toman\n"
+        f"👤 Username: {final_username}"
     )
+    await send_connection_card(query.message, uid, title, config, reply_markup=menu(uid))
 
 
 async def confirm_buy(update, context):
@@ -963,11 +1042,11 @@ async def confirm_buy(update, context):
         else:
             service, pid = "gold", int(parts[1])
     except (ValueError, IndexError):
-        await query.answer("❌ سفارش نامعتبر است.", show_alert=True)
+        await query.answer(ui(uid, "❌ سفارش نامعتبر است.", "❌ Invalid order."), show_alert=True)
         return
     pending = context.user_data.get("pending_purchase")
     if not pending or pending.get("plan_id") != pid or pending.get("service", "gold") != service:
-        await query.answer("❌ سفارش پیدا نشد.", show_alert=True)
+        await query.answer(ui(uid, "❌ سفارش پیدا نشد.", "❌ Order not found."), show_alert=True)
         return
     await _complete_pending_purchase(update, context)
 
@@ -1026,19 +1105,161 @@ async def orders(update, context):
     if not await gate(update, context):
         return
     uid = update.effective_user.id
-    rows = db.user_orders(uid)
-    if not rows:
-        await update.message.reply_text(tr(uid, "no_orders"))
+    rows = [r for r in db.user_orders(uid) if r["status"] == "completed" and r["panel_username"]]
+    active = []
+    now = int(__import__("time").time())
+    for row in rows[:30]:
+        info = await get_customer_info(row["panel_username"], row["service"] or "gold")
+        if not info.get("ok"):
+            continue
+        expire = info.get("expire")
+        if isinstance(expire, str):
+            try:
+                expire = int(float(expire))
+            except ValueError:
+                try:
+                    from datetime import datetime
+                    expire = int(datetime.fromisoformat(expire.replace("Z", "+00:00")).timestamp())
+                except Exception:
+                    expire = None
+        if expire is None or int(expire) <= now:
+            continue
+        active.append((row, info, int(expire)))
+    if not active:
+        await update.message.reply_text(ui(uid, "🟣 هنوز سرویس فعالی ندارید.", "🟣 You have no active services."), reply_markup=menu(uid))
         return
+    buttons = []
+    for row, info, expire in active[:20]:
+        gb = ui(uid, "نامحدود", "Unlimited") if row["gb"] is None else f"{row['gb']} GB"
+        service = str(row["service"] or "gold").upper()
+        buttons.append([InlineKeyboardButton(f"🟣 #{row['id']} | {service} | {gb}", callback_data=f"active_order:{row['id']}", style="primary")])
+    await update.message.reply_text(ui(uid, "🟣 <b>سفارش‌های فعال شما:</b>\n\nیکی از سرویس‌ها را انتخاب کنید:", "🟣 <b>Your active services:</b>\n\nChoose a service:"), parse_mode="HTML", reply_markup=InlineKeyboardMarkup(buttons))
 
-    lines = []
-    for row in rows:
+
+async def active_order_detail(update, context):
+    q = update.callback_query
+    uid = q.from_user.id
+    await q.answer()
+    try:
+        oid = int(q.data.split(":", 1)[1])
+    except (ValueError, IndexError):
+        await q.message.reply_text(ui(uid, "❌ سفارش نامعتبر است.", "❌ Invalid order."), reply_markup=menu(uid))
+        return
+    row = db.get_order(uid, oid)
+    if not row or row["status"] != "completed" or not row["panel_username"]:
+        await q.message.reply_text(ui(uid, "❌ سرویس فعال پیدا نشد.", "❌ Active service not found."), reply_markup=menu(uid))
+        return
+    info = await get_customer_info(row["panel_username"], row["service"] or "gold")
+    if not info.get("ok"):
+        await q.message.reply_text(ui(uid, "❌ دریافت اطلاعات سرویس از پنل انجام نشد. لطفاً بعداً دوباره تلاش کنید.", "❌ Could not retrieve service information from the panel. Please try again later."), reply_markup=menu(uid))
+        return
+    expire = info.get("expire")
+    if isinstance(expire, str):
+        try:
+            expire = int(float(expire))
+        except ValueError:
+            try:
+                from datetime import datetime
+                expire = int(datetime.fromisoformat(expire.replace("Z", "+00:00")).timestamp())
+            except Exception:
+                expire = None
+    now = int(__import__("time").time())
+    if not expire or expire <= now:
+        await q.message.reply_text(ui(uid, "❌ این سرویس دیگر فعال نیست.", "❌ This service is no longer active."), reply_markup=menu(uid))
+        return
+    days_left = max(1, (int(expire) - now + 86399) // 86400)
+    gb = ui(uid, "نامحدود", "Unlimited") if row["gb"] is None else f"{row['gb']} GB"
+    connection = info.get("subscription_url") or row["config"] or ""
+    service_label = TEXT[lang(uid)].get(str(row["service"]), str(row["service"]).title())
+    if lang(uid) == "fa":
+        text = (f"🟣 <b>سرویس فعال شما</b>\n\n🧾 سفارش: #{oid}\n🔌 سرویس: {service_label}\n📦 حجم: {gb}\n⏳ روز باقی‌مانده: <b>{days_left} روز</b>\n👤 نام کاربری: <code>{html.escape(str(row['panel_username']))}</code>\n\n🔗 لینک اشتراک:\n{html.escape(str(connection))}")
+    else:
+        text = (f"🟣 <b>Your Active Service</b>\n\n🧾 Order: #{oid}\n🔌 Service: {service_label}\n📦 Volume: {gb}\n⏳ Days remaining: <b>{days_left} days</b>\n👤 Username: <code>{html.escape(str(row['panel_username']))}</code>\n\n🔗 Subscription:\n{html.escape(str(connection))}")
+    await q.message.reply_text(text, parse_mode="HTML", reply_markup=menu(uid))
+
+
+async def renew_service(update, context):
+    if not await gate(update, context):
+        return
+    uid = update.effective_user.id
+    rows = [r for r in db.user_orders(uid) if r["status"] == "completed" and r["panel_username"]]
+    if not rows:
+        await update.message.reply_text(tr(uid, "renew_none"), reply_markup=menu(uid))
+        return
+    buttons = []
+    for row in rows[:20]:
+        service = str(row["service"] or "gold").upper()
         gb = "Unlimited" if row["gb"] is None else f"{row['gb']} GB"
-        lines.append(
-            f"🧾 #{row['id']} | {gb} | {row['price']:,} Toman | {row['status']}"
-        )
-    await update.message.reply_text("\n".join(lines))
+        buttons.append([InlineKeyboardButton(f"🔄 #{row['id']} | {service} | {gb}", callback_data=f"renew:{row['id']}", style="primary")])
+    await update.message.reply_text(tr(uid, "renew_choose"), reply_markup=InlineKeyboardMarkup(buttons))
 
+
+async def renew_confirm(update, context):
+    q = update.callback_query
+    uid = q.from_user.id
+    await q.answer()
+    try:
+        oid = int(q.data.split(":", 1)[1])
+    except (ValueError, IndexError):
+        await q.message.reply_text(ui(uid, "❌ سفارش نامعتبر است.", "❌ Invalid order."))
+        return
+    row = db.get_order(uid, oid)
+    if not row or row["status"] != "completed" or not row["panel_username"]:
+        await q.message.reply_text(tr(uid, "renew_error"), reply_markup=menu(uid))
+        return
+    plan = db.get_plan(row["plan_id"]) if row["plan_id"] else None
+    price = int(plan["price"]) if plan and plan["active"] else int(row["price"])
+    gb = "Unlimited" if row["gb"] is None else f"{row['gb']} GB"
+    service_label = TEXT[lang(uid)].get(str(row["service"]), str(row["service"]).title())
+    await q.message.reply_text(
+        tr(uid, "renew_confirm", oid=oid, service=service_label, gb=gb, price=price, days=RENEW_DAYS),
+        parse_mode="HTML",
+        reply_markup=InlineKeyboardMarkup([[
+            InlineKeyboardButton("✅ تأیید تمدید" if lang(uid) == "fa" else "✅ Confirm Renewal", callback_data=f"renew_confirm:{oid}", style="success"),
+            InlineKeyboardButton("❌ لغو" if lang(uid) == "fa" else "❌ Cancel", callback_data="renew_cancel", style="danger"),
+        ]]),
+    )
+
+
+async def renew_execute(update, context):
+    q = update.callback_query
+    uid = q.from_user.id
+    await q.answer()
+    try:
+        oid = int(q.data.split(":", 1)[1])
+    except (ValueError, IndexError):
+        await q.message.reply_text(ui(uid, "❌ سفارش نامعتبر است.", "❌ Invalid order."))
+        return
+    row = db.get_order(uid, oid)
+    if not row or row["status"] != "completed" or not row["panel_username"]:
+        await q.message.reply_text(tr(uid, "renew_error"), reply_markup=menu(uid))
+        return
+    plan = db.get_plan(row["plan_id"]) if row["plan_id"] else None
+    price = int(plan["price"]) if plan and plan["active"] else int(row["price"])
+    if not db.charge_renewal(uid, oid, price):
+        await q.message.reply_text(tr(uid, "not_enough", balance=db.get_user(uid)["balance"], price=price), reply_markup=menu(uid))
+        return
+    result = await extend_customer(row["panel_username"], RENEW_DAYS, service=row["service"] or "gold")
+    if not result.get("ok"):
+        db.refund_renewal(uid, price, oid)
+        await q.message.reply_text(tr(uid, "renew_error"), reply_markup=menu(uid))
+        return
+    config = result.get("connection_details") or result.get("subscription_url") or result.get("config") or row["config"] or ""
+    if config:
+        db.complete_order(oid, row["panel_username"], str(config))
+    await send_connection_card(
+        q.message, uid,
+        tr(uid, "renew_ok", days=RENEW_DAYS),
+        config,
+        extra_lines=[f"🧾 {ui(uid, 'سفارش', 'Order')}: #{oid}", f"📅 {ui(uid, 'تمدید', 'Renewal')}: {RENEW_DAYS} {ui(uid, 'روز', 'days')}"],
+        reply_markup=menu(uid),
+    )
+
+
+async def renew_cancel(update, context):
+    q = update.callback_query
+    await q.answer()
+    await q.message.reply_text("❌ لغو شد." if lang(q.from_user.id) == "fa" else "❌ Cancelled.", reply_markup=menu(q.from_user.id))
 
 async def support(update, context):
     if not await gate(update, context):
@@ -1058,11 +1279,158 @@ async def account(update, context):
     )
 
 
+GUIDE_APPS = {
+    "v2box": {
+        "name": "V2Box",
+        "video": GUIDE_VIDEO_V2BOX,
+        "play": "https://play.google.com/store/apps/details?id=dev.hexasoftware.v2box",
+        "ios": "https://apps.apple.com/us/app/v2box-v2ray-client/id6446814690",
+        "text": "V2Box tutorial: add the subscription link, update the subscription, and connect.",
+    },
+    "happ": {
+        "name": "Happ",
+        "video": GUIDE_VIDEO_HAPP,
+        "play": "https://play.google.com/store/apps/details?id=com.happproxy",
+        "ios": "https://apps.apple.com/us/app/happ-proxy-utility/id6504287215",
+        "text": "Happ tutorial: add the subscription link, update the subscription, and connect.",
+    },
+    "hiddify": {
+        "name": "Hiddify",
+        "video": GUIDE_VIDEO_HIDDIFY,
+        "play": "https://play.google.com/store/apps/details?id=app.hiddify.com",
+        "ios": "https://apps.apple.com/us/app/hiddify-proxy-vpn/id6596777532",
+        "text": "Hiddify tutorial: add the subscription link, update the profile, and connect.",
+    },
+    "streisand": {
+        "name": "Streisand",
+        "video": GUIDE_VIDEO_STREISAND,
+        "play": "",
+        "ios": "https://apps.apple.com/us/app/streisand/id6450534064",
+        "text": "Streisand tutorial: add the subscription link, update it, and connect.",
+    },
+}
+
+
+def guide_keyboard():
+    return InlineKeyboardMarkup([
+        [InlineKeyboardButton("🟣 Hiddify", callback_data="guide_app:hiddify", style="primary")],
+        [InlineKeyboardButton("🟣 V2Box", callback_data="guide_app:v2box", style="primary")],
+        [InlineKeyboardButton("🟣 Streisand", callback_data="guide_app:streisand", style="primary")],
+        [InlineKeyboardButton("🟣 Happ", callback_data="guide_app:happ", style="primary")],
+    ])
+
+
 async def guide(update, context):
     if not await gate(update, context):
         return
-    await update.message.reply_text(tr(update.effective_user.id, "guide_text"))
+    uid = update.effective_user.id
+    if lang(uid) == "fa":
+        text = (
+            "📚 <b>راهنمای استفاده از آلفا شاپ</b>\n\n"
+            "بعد از خرید سرویس، <b>لینک اشتراک</b> و QR Code برای شما ارسال می‌شود. "
+            "برنامه موردنظر خود را انتخاب کنید تا آموزش ویدیویی همان برنامه را ببینید.\n\n"
+            "در آموزش‌ها نحوه اضافه کردن لینک اشتراک، به‌روزرسانی اشتراک و اتصال به سرویس توضیح داده شده است.\n\n"
+            "🆘 اگر بعد از وارد کردن لینک سرورها نمایش داده نشدند، ابتدا Subscription را Update کنید و یک سرور دیگر را امتحان کنید. "
+            "اگر مشکل برطرف نشد، از بخش 📞 پشتیبانی با ما در ارتباط باشید.\n\n"
+            "👇 <b>برنامه موردنظر را انتخاب کنید:</b>"
+        )
+    else:
+        text = (
+            "📚 <b>Alpha Shop Guide</b>\n\n"
+            "After purchasing a service, you will receive a <b>subscription link</b> and QR Code. "
+            "Choose your client below to watch its tutorial.\n\n"
+            "The tutorials explain how to add the subscription link, update the subscription, and connect.\n\n"
+            "🆘 If servers do not appear, update the subscription first and try another server. "
+            "If the problem continues, contact 📞 Support.\n\n"
+            "👇 <b>Choose your app:</b>"
+        )
+    await update.message.reply_text(text, parse_mode="HTML", reply_markup=guide_keyboard())
 
+
+async def guide_app(update, context):
+    q = update.callback_query
+    uid = q.from_user.id
+    await q.answer()
+    key = q.data.split(":", 1)[1]
+    app_info = GUIDE_APPS.get(key)
+    if not app_info:
+        return
+
+    buttons = []
+    if app_info["play"]:
+        buttons.append(InlineKeyboardButton("🤖 Google Play", url=app_info["play"], style="primary"))
+    if app_info["ios"]:
+        buttons.append(InlineKeyboardButton("🍎 App Store", url=app_info["ios"], style="primary"))
+    markup = InlineKeyboardMarkup([buttons] if buttons else [])
+
+    captions = {
+        "hiddify": ui(uid, "🎥 آموزش Hiddify\n\nوارد کردن لینک اشتراک، به‌روزرسانی پروفایل و اتصال به سرویس.", "🎥 Hiddify Tutorial\n\nAdd the subscription link, update the profile, and connect."),
+        "v2box": ui(uid, "🎥 آموزش V2Box\n\nاضافه کردن لینک اشتراک، به‌روزرسانی Subscription و اتصال به سرویس.", "🎥 V2Box Tutorial\n\nAdd the subscription link, update the subscription, and connect."),
+        "streisand": ui(uid, "🎥 آموزش Streisand\n\nاضافه کردن لینک اشتراک، به‌روزرسانی و اتصال به سرویس.", "🎥 Streisand Tutorial\n\nAdd the subscription link, update it, and connect."),
+        "happ": ui(uid, "🎥 آموزش Happ\n\nاضافه کردن لینک اشتراک، به‌روزرسانی و اتصال به سرویس.", "🎥 Happ Tutorial\n\nAdd the subscription link, update it, and connect."),
+    }
+    caption = captions.get(key, f"🟣 <b>{app_info['name']}</b>") + "\n\n" + ui(uid, "📥 لینک نصب برنامه:", "📥 Install the app:")
+    video = app_info["video"]
+
+    # A video can be either a Telegram file_id from .env or a bundled local MP4.
+    if video and os.path.isfile(video):
+        with open(video, "rb") as video_file:
+            await q.message.reply_video(video=video_file, caption=caption, parse_mode="HTML", reply_markup=markup)
+    elif video:
+        await q.message.reply_video(video=video, caption=caption, parse_mode="HTML", reply_markup=markup)
+    else:
+        await q.message.reply_text(
+            caption + "\n\n" + ui(uid, "🎬 ویدیوی این بخش هنوز تنظیم نشده است.", "🎬 The tutorial video for this section has not been configured yet."),
+            parse_mode="HTML",
+            reply_markup=markup,
+        )
+
+
+
+BROADCAST_MESSAGE = 10
+
+
+async def admin_broadcast_start(update, context):
+    if update.effective_user.id not in ADMIN_IDS:
+        await update.callback_query.answer("⛔ Access denied", show_alert=True)
+        return ConversationHandler.END
+    await update.callback_query.answer()
+    context.user_data["broadcast_active"] = True
+    await update.callback_query.message.reply_text(tr(update.effective_user.id, "broadcast_start"))
+    return BROADCAST_MESSAGE
+
+
+async def broadcast_receive(update, context):
+    uid = update.effective_user.id
+    if uid not in ADMIN_IDS:
+        return ConversationHandler.END
+    users = db.all_users(limit=100000)
+    ok = 0
+    fail = 0
+    for user in users:
+        target = int(user["id"])
+        if int(user["blocked"] or 0):
+            continue
+        try:
+            await context.bot.copy_message(
+                chat_id=target,
+                from_chat_id=update.effective_chat.id,
+                message_id=update.effective_message.message_id,
+            )
+            ok += 1
+        except Exception as exc:
+            fail += 1
+            print("Broadcast failed:", target, repr(exc))
+        await asyncio.sleep(0.03)
+    context.user_data.pop("broadcast_active", None)
+    await update.effective_message.reply_text(tr(uid, "broadcast_done", ok=ok, fail=fail))
+    return ConversationHandler.END
+
+
+async def broadcast_cancel(update, context):
+    context.user_data.pop("broadcast_active", None)
+    await update.message.reply_text("❌ پیام همگانی لغو شد.")
+    return ConversationHandler.END
 
 async def admin_panel(update, context):
     if update.effective_user.id not in ADMIN_IDS:
@@ -1083,6 +1451,7 @@ async def admin_panel(update, context):
             [
                 InlineKeyboardButton("👥 کاربران", callback_data="admin_users", style="primary"),
                 InlineKeyboardButton("➕ افزایش موجودی", callback_data="admin_balance", style="success"),
+                InlineKeyboardButton("📢 پیام همگانی", callback_data="admin_broadcast", style="primary"),
             ],
         ]
     )
@@ -1180,6 +1549,10 @@ async def admin_callback(update, context):
                 f"{u['id']} | @{u['username'] or '-'} | {u['balance']:,} تومان"
             )
         await q.message.reply_text("\n".join(text))
+
+    elif q.data == "admin_broadcast":
+        await q.message.reply_text("📢 برای شروع ارسال پیام همگانی، دکمه ورود به حالت ارسال را بزنید.")
+        await q.message.reply_text("👇", reply_markup=InlineKeyboardMarkup([[InlineKeyboardButton("📢 شروع پیام همگانی", callback_data="start_broadcast", style="primary")]]))
 
     elif q.data == "admin_balance":
         await q.message.reply_text(
@@ -1331,7 +1704,12 @@ async def trial_service(update, context):
         or ""
     )
     db.set_trial_used(uid, service)
-    await q.message.reply_text(tr(uid, "trial_success", service=TEXT[lang(uid)][service], config=config or "Panel API did not return connection details."), reply_markup=menu(uid))
+    title = (
+        f"🎉 تست رایگان {TEXT[lang(uid)][service]} شما فعال شد." if lang(uid) == "fa"
+        else f"🎉 Your {TEXT[lang(uid)][service]} free trial has been activated."
+    )
+    extra = ["📦 حجم: ۱۵۰ مگابایت", "📅 اعتبار: ۱ روز"] if lang(uid) == "fa" else ["📦 Volume: 150 MB", "📅 Validity: 1 day"]
+    await send_connection_card(q.message, uid, title, config, extra_lines=extra, reply_markup=menu(uid))
 
 
 def run_bot():
@@ -1409,10 +1787,10 @@ def run_bot():
                     & ~filters.Regex(
                         r"^(🏠 منوی اصلی|🛒 فروشگاه|💰 کیف پول|"
                         r"👤 حساب کاربری|👥 زیرمجموعه‌گیری|📞 پشتیبانی|"
-                        r"⚙️ تنظیمات|📚 راهنما|🛒 خرید سرویس|📦 سفارش‌های من|"
+                        r"⚙️ تنظیمات|📚 راهنما|🛒 خرید سرویس|🔄 تمدید سرویس|🟣 سفارش‌های فعال|"
                         r"🏠 Main Menu|🛒 Shop|💰 Wallet|"
                         r"👤 Account|👥 Referrals|📞 Support|"
-                        r"⚙️ Settings|📚 Guide|🛒 Buy Service|📦 My Orders)$"
+                        r"⚙️ Settings|📚 Guide|🛒 Buy Service|🔄 Renew Service|🟣 Active Services)$"
                     ),
                     coupon_input,
                 ),
@@ -1431,7 +1809,15 @@ def run_bot():
     app.add_handler(CommandHandler("addcoupon", add_coupon_cmd))
 
     # Conversations
+    broadcast_conv = ConversationHandler(
+        entry_points=[CallbackQueryHandler(admin_broadcast_start, pattern=r"^start_broadcast$")],
+        states={BROADCAST_MESSAGE: [MessageHandler(filters.ALL & ~filters.COMMAND, broadcast_receive)]},
+        fallbacks=[CommandHandler("cancelbroadcast", broadcast_cancel)],
+        allow_reentry=True,
+    )
+
     app.add_handler(deposit_conv)
+    app.add_handler(broadcast_conv)
     app.add_handler(custom_conv)
     app.add_handler(coupon_conv)
     app.add_handler(
@@ -1475,6 +1861,10 @@ def run_bot():
 
     app.add_handler(CallbackQueryHandler(shop_service, pattern=r"^shop_service:(gold|silver|bronze)$"))
     app.add_handler(CallbackQueryHandler(trial_service, pattern=r"^trial:(gold|silver|bronze)$"))
+    app.add_handler(CallbackQueryHandler(active_order_detail, pattern=r"^active_order:\d+$"))
+    app.add_handler(CallbackQueryHandler(renew_confirm, pattern=r"^renew:\d+$"))
+    app.add_handler(CallbackQueryHandler(renew_execute, pattern=r"^renew_confirm:\d+$"))
+    app.add_handler(CallbackQueryHandler(renew_cancel, pattern=r"^renew_cancel$"))
 
     app.add_handler(
         CallbackQueryHandler(
@@ -1495,6 +1885,13 @@ def run_bot():
         MessageHandler(
             filters.Regex(r"^(🛒 خرید سرویس|🛒 Buy Service)$"),
             shop,
+        )
+    )
+
+    app.add_handler(
+        MessageHandler(
+            filters.Regex(r"^(🔄 تمدید سرویس|🔄 Renew Service)$"),
+            renew_service,
         )
     )
 
@@ -1521,7 +1918,7 @@ def run_bot():
 
     app.add_handler(
         MessageHandler(
-            filters.Regex(r"^(📦 سفارش‌های من|📦 My Orders)$"),
+            filters.Regex(r"^(🟣 سفارش‌های فعال|🟣 Active Services)$"),
             orders,
         )
     )
@@ -1546,6 +1943,8 @@ def run_bot():
             guide,
         )
     )
+
+    app.add_handler(CallbackQueryHandler(guide_app, pattern=r"^guide_app:(v2box|happ|hiddify|streisand)$"))
 
     print("🌹 AlphaShop Pro Bot Running...")
 

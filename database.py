@@ -297,6 +297,35 @@ def refund(oid, uid, price):
         c.execute("UPDATE orders SET status='refunded' WHERE id=?", (oid,))
 
 
+def get_order(uid, oid):
+    with conn() as c:
+        return c.execute("SELECT * FROM orders WHERE id=? AND user_id=?", (oid, uid)).fetchone()
+
+
+def charge_renewal(uid, oid, amount):
+    """Atomically charge the wallet for a renewal of an existing completed order."""
+    with LOCK, conn() as c:
+        row = c.execute("SELECT id,status FROM orders WHERE id=? AND user_id=?", (oid, uid)).fetchone()
+        u = c.execute("SELECT balance FROM users WHERE id=?", (uid,)).fetchone()
+        if not row or row["status"] != "completed" or not u or u["balance"] < amount:
+            return False
+        c.execute("UPDATE users SET balance=balance-? WHERE id=?", (amount, uid))
+        c.execute(
+            "INSERT INTO transactions(user_id,kind,amount,description,created_at) VALUES(?,?,?,?,?)",
+            (uid, "renewal", -amount, f"Renewal #{oid}", int(time.time())),
+        )
+        return True
+
+
+def refund_renewal(uid, amount, oid):
+    with LOCK, conn() as c:
+        c.execute("UPDATE users SET balance=balance+? WHERE id=?", (amount, uid))
+        c.execute(
+            "INSERT INTO transactions(user_id,kind,amount,description,created_at) VALUES(?,?,?,?,?)",
+            (uid, "renewal_refund", amount, f"Renewal refund #{oid}", int(time.time())),
+        )
+
+
 def user_orders(uid):
     with conn() as c:
         return c.execute(

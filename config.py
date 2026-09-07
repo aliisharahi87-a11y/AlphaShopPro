@@ -60,9 +60,18 @@ BRONZE_PRICE_PER_GB = _i("BRONZE_PRICE_PER_GB", 1000)
 FREE_TEST_ENABLED = _s("FREE_TEST_ENABLED", "True").lower() == "true"
 FREE_TEST_GB = _f("FREE_TEST_GB", 0.15)
 FREE_TEST_DAYS = _i("FREE_TEST_DAYS", 1)
+RENEW_DAYS = _i("RENEW_DAYS", 30)
 FREE_TEST_GROUP_ID = _i("FREE_TEST_GROUP_ID", 1)
 DEFAULT_GROUP_ID = _i("DEFAULT_GROUP_ID", 1)
 DEFAULT_HWID_LIMIT = _i("DEFAULT_HWID_LIMIT", 0)
 DEFAULT_STATUS = _s("DEFAULT_STATUS", "active") or "active"
 SHADOWSOCKS_METHOD = _s("SHADOWSOCKS_METHOD", "chacha20-ietf-poly1305")
 LOG_LEVEL = _s("LOG_LEVEL", "INFO")
+
+# Guide tutorial videos. Local files are included in the final package;
+# these can also be overridden with Telegram file_id values in .env.
+_BASE_DIR = os.path.dirname(os.path.abspath(__file__))
+GUIDE_VIDEO_V2BOX = _s("GUIDE_VIDEO_V2BOX", os.path.join(_BASE_DIR, "tutorial_videos", "V2Box.mp4"))
+GUIDE_VIDEO_HAPP = _s("GUIDE_VIDEO_HAPP", os.path.join(_BASE_DIR, "tutorial_videos", "Happ.mp4"))
+GUIDE_VIDEO_HIDDIFY = _s("GUIDE_VIDEO_HIDDIFY", os.path.join(_BASE_DIR, "tutorial_videos", "Hiddify.mp4"))
+GUIDE_VIDEO_STREISAND = _s("GUIDE_VIDEO_STREISAND", os.path.join(_BASE_DIR, "tutorial_videos", "Streisand.mp4"))

@@ -33,25 +33,23 @@ async def _json(response):
         return {"raw": raw[:4000]}
 
 
+def _normalize_connection_url(value):
+    s = str(value or "").strip()
+    if not s:
+        return ""
+    if s.startswith(("http://", "https://", "vless://", "vmess://", "trojan://", "ss://")):
+        return s
+    if s.startswith("//"):
+        return "https:" + s
+    # Marzban deployments may return the subscription URL without a scheme.
+    if s.startswith(("pan.", "sub.", "link.", "localhost", "127.", "10.", "172.", "192.")) or "/" in s:
+        return "https://" + s.lstrip("/")
+    return "https://" + s.lstrip("/")
+
+
 def _first_url(obj):
     if isinstance(obj, str):
-        s = obj.strip()
-        if not s:
-            return ""
-
-        # Connection/subscription protocols: keep exactly as returned.
-        if s.startswith(("vless://", "vmess://", "trojan://", "ss://")):
-            return s
-
-        # Web URL: add https:// only when it is missing.
-        if s.startswith("https://") or s.startswith("http://"):
-            return s
-
-        # Bare domain/path returned by Marzban.
-        if s.startswith(("pan.", "www.", "localhost", "127.0.0.1")) or "." in s.split("/")[0]:
-            return "https://" + s.lstrip("/")
-
-        return ""
+        return _normalize_connection_url(obj)
     if isinstance(obj, dict):
         for k in ("subscription_url", "subscriptionUrl", "sub_url", "subUrl", "link", "url"):
             v = obj.get(k)
@@ -181,3 +179,61 @@ async def create_customer(username, gb, unlimited=False, days=30, group_ids=None
         except Exception as exc:
             print(f"❌ SILVER EXCEPTION: {exc!r}")
             return {"ok": False, "data": {"error": str(exc)}, "subscription_url": "", "connection_details": "", "config": ""}
+
+
+async def extend_customer(username, days=30):
+    """Extend an existing Marzban user from its current expiry date."""
+    panel_url, _, _ = _config()
+    timeout = aiohttp.ClientTimeout(total=60, connect=12, sock_connect=12, sock_read=35)
+    async with aiohttp.ClientSession(timeout=timeout) as session:
+        try:
+            token = await _login(session, panel_url)
+            headers = {"Authorization": f"Bearer {token}", "Accept": "application/json", "Content-Type": "application/json"}
+            async with session.get(f"{panel_url}/api/user/{username}", headers=headers) as r:
+                current = await _json(r)
+                if r.status != 200:
+                    raise RuntimeError(f"Marzban get user HTTP {r.status}: {current}")
+
+            old_expire = current.get("expire") if isinstance(current, dict) else None
+            now = int(time.time())
+            if old_expire is None:
+                new_expire = now + int(days) * 86400
+            else:
+                try:
+                    old_expire = int(old_expire)
+                except (TypeError, ValueError):
+                    old_expire = now
+                new_expire = max(old_expire, now) + int(days) * 86400
+
+            payload = {"expire": new_expire, "status": "active"}
+            async with session.put(f"{panel_url}/api/user/{username}", headers=headers, json=payload) as r:
+                data = await _json(r)
+                print(f"🥈 SILVER EXTEND HTTP {r.status}: {data}")
+                if r.status not in (200, 201):
+                    raise RuntimeError(f"Marzban modify user HTTP {r.status}: {data}")
+
+            connection = _first_url(data) or _first_url(current)
+            return {"ok": True, "data": data, "subscription_url": connection,
+                    "connection_details": connection, "config": connection, "expire": new_expire}
+        except Exception as exc:
+            print(f"❌ SILVER EXTEND EXCEPTION: {exc!r}")
+            return {"ok": False, "data": {"error": str(exc)}, "subscription_url": "", "connection_details": "", "config": ""}
+
+
+async def get_customer_info(username):
+    panel_url, _, _ = _config()
+    timeout = aiohttp.ClientTimeout(total=40, connect=10, sock_connect=10, sock_read=25)
+    async with aiohttp.ClientSession(timeout=timeout) as session:
+        try:
+            token = await _login(session, panel_url)
+            headers = {"Authorization": f"Bearer {token}", "Accept": "application/json", "Content-Type": "application/json"}
+            username = str(username).strip()
+            async with session.get(f"{panel_url}/api/user/{username}", headers=headers) as r:
+                data = await _json(r)
+                if r.status != 200:
+                    return {"ok": False, "error": f"Marzban get user HTTP {r.status}: {data}"}
+            connection = _first_url(data)
+            return {"ok": True, "user": data, "subscription_url": connection, "expire": data.get("expire") if isinstance(data, dict) else None, "data_limit": data.get("data_limit") if isinstance(data, dict) else None, "status": data.get("status") if isinstance(data, dict) else None}
+        except Exception as exc:
+            print(f"❌ SILVER USER INFO EXCEPTION: {exc!r}")
+            return {"ok": False, "error": str(exc)}
