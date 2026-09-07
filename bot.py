@@ -528,6 +528,13 @@ async def deposit_receipt(update, context):
 
     receipt = update.message.photo[-1].file_id
     rid = db.add_deposit(uid, amount, receipt)
+
+    try:
+        await update.message.set_reaction(
+            reaction=[{"type": "emoji", "emoji": "❤️"}]
+        )
+    except Exception as e:
+        print(f"❌ Receipt reaction failed: {e}")
     context.user_data.clear()
 
     await update.message.reply_text(
