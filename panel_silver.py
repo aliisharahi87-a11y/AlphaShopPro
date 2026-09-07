@@ -164,7 +164,7 @@ async def create_customer(username, gb, unlimited=False, days=30, group_ids=None
                 pass
             elif status not in (200, 201):
                 raise RuntimeError(f"Marzban create user HTTP {status}: {data}")
-            connection = _first_url(data)
+            connection = _normalize_connection_url(_first_url(data))
             user_data = data
             if not connection:
                 async with session.get(f"{panel_url}/api/user/{username}", headers=headers) as r:
