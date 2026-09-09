@@ -330,7 +330,7 @@ async def _pasargard_create_customer(
 
     # Do not force a group ID: PasarGuard allows user creation without a group,
     # and a stale/nonexistent DEFAULT_GROUP_ID causes HTTP 422 on some panels.
-    group_ids = list(group_ids or [1, 2, 3])
+    group_ids = list(group_ids or [])
 
     timeout = aiohttp.ClientTimeout(
         total=30,
