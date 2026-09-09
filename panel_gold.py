@@ -307,6 +307,38 @@ async def _get_subscription_links(session, panel_url, headers, created_data, use
     return []
 
 
+
+async def _get_all_gold_group_ids(session, panel_url, headers):
+    try:
+        async with session.get(f"{panel_url}/api/group", headers=headers) as response:
+            data = await _read_json(response)
+            if response.status != 200:
+                print(f"❌ GOLD GROUP API STATUS: {response.status}")
+                print(f"📥 GOLD GROUP API RESPONSE: {data}")
+                return []
+
+            items = data
+            if isinstance(data, dict):
+                for key in ("groups", "items", "data", "results"):
+                    if isinstance(data.get(key), list):
+                        items = data[key]
+                        break
+
+            if not isinstance(items, list):
+                return []
+
+            ids = []
+            for item in items:
+                if isinstance(item, dict) and item.get("id") is not None:
+                    if not item.get("is_disabled", False):
+                        ids.append(int(item["id"]))
+
+            print(f"✅ GOLD GROUP IDS: {ids}")
+            return ids
+    except Exception as e:
+        print(f"❌ GOLD GROUP FETCH ERROR: {e}")
+        return []
+
 async def _pasargard_create_customer(
     username,
     gb,
@@ -330,7 +362,7 @@ async def _pasargard_create_customer(
 
     # Do not force a group ID: PasarGuard allows user creation without a group,
     # and a stale/nonexistent DEFAULT_GROUP_ID causes HTTP 422 on some panels.
-    group_ids = list(group_ids or [])
+    group_ids = list(group_ids) if group_ids else await _get_all_gold_group_ids(session, panel_url, headers)
 
     timeout = aiohttp.ClientTimeout(
         total=30,
