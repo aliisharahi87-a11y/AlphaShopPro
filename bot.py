@@ -982,7 +982,8 @@ async def _complete_pending_purchase(update, context):
         db.refund(oid, uid, price)
         context.user_data.pop("pending_purchase", None)
         await query.message.reply_text(
-            tr(uid, "panel_error"),
+            ui(uid, "❌ هنگام ساخت سرویس خطایی رخ داد و مبلغ به کیف پول شما برگشت.",
+               "❌ An error occurred while creating the service and your payment was refunded."),
             reply_markup=menu(uid),
         )
         return
