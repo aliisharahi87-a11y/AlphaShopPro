@@ -973,9 +973,21 @@ async def _complete_pending_purchase(update, context):
         return
 
     username = f"alpha_{uid}_{oid}"
-    result = await create_customer(username, gb, unlimited, service=service)
+    try:
+        print(f"🛒 PURCHASE START uid={uid} order={oid} service={service} gb={gb} unlimited={unlimited}")
+        result = await create_customer(username, gb, unlimited, service=service)
+        print(f"🛒 PURCHASE RESULT: {result}")
+    except Exception as exc:
+        print(f"❌ PURCHASE EXCEPTION: {type(exc).__name__}: {exc!r}")
+        db.refund(oid, uid, price)
+        context.user_data.pop("pending_purchase", None)
+        await query.message.reply_text(
+            tr(uid, "panel_error"),
+            reply_markup=menu(uid),
+        )
+        return
 
-    if not result["ok"]:
+    if not result.get("ok"):
         db.refund(oid, uid, price)
         context.user_data.pop("pending_purchase", None)
         await query.message.reply_text(
