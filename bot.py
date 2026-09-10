@@ -1045,6 +1045,7 @@ async def _complete_pending_purchase(update, context):
 
 async def confirm_buy(update, context):
     query = update.callback_query
+    uid = query.from_user.id
     parts = query.data.split(":")
     try:
         if len(parts) == 3:
