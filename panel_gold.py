@@ -328,9 +328,27 @@ async def _pasargard_create_customer(
     """
     service = (service or "gold").lower()
 
-    # Do not force a group ID: PasarGuard allows user creation without a group,
-    # and a stale/nonexistent DEFAULT_GROUP_ID causes HTTP 422 on some panels.
+    # Gold must be assigned to ALL available PasarGuard groups.
+    if not group_ids:
+        group_ids = await _get_all_gold_group_ids(
+            session,
+            panel_url,
+            headers,
+        )
+
     group_ids = list(group_ids or [])
+
+    if not group_ids:
+        print("❌ GOLD: No groups found; refusing to create user without groups.")
+        return {
+            "ok": False,
+            "data": {"error": "No Gold groups found"},
+            "subscription_url": "",
+            "connection_details": "",
+            "config": "",
+        }
+
+    print(f"🎯 GOLD GROUPS TO ASSIGN: {group_ids}")
 
     timeout = aiohttp.ClientTimeout(
         total=30,
@@ -535,6 +553,54 @@ async def _extend_pasarguard_customer(username, days=30, service="gold"):
 
 async def get_customer_info(username):
     return await _pasarguard_user_info(username, service="gold")
+
+async def _get_all_gold_group_ids(session, panel_url, headers):
+    """Return all available PasarGuard group IDs for Gold."""
+    try:
+        async with session.get(
+            f"{panel_url}/api/group",
+            headers=headers,
+        ) as response:
+            data = await _read_json(response)
+
+            print(f"📦 GOLD GROUP STATUS: {response.status}")
+            print(f"📥 GOLD GROUP RESPONSE: {data}")
+
+            if response.status != 200:
+                return []
+
+            items = []
+
+            if isinstance(data, list):
+                items = data
+            elif isinstance(data, dict):
+                for key in ("items", "groups", "data", "results"):
+                    value = data.get(key)
+                    if isinstance(value, list):
+                        items = value
+                        break
+
+            group_ids = []
+
+            for group in items:
+                if isinstance(group, dict):
+                    group_id = (
+                        group.get("id")
+                        or group.get("_id")
+                        or group.get("group_id")
+                    )
+                    if group_id is not None:
+                        group_ids.append(group_id)
+
+            group_ids = list(dict.fromkeys(group_ids))
+
+            print(f"✅ GOLD ALL GROUP IDS: {group_ids}")
+            return group_ids
+
+    except Exception as e:
+        print(f"❌ GOLD GROUP ERROR: {type(e).__name__}: {e}")
+        return []
+
 
 async def create_customer(username, gb, unlimited=False, days=30, group_ids=None, note=""):
     return await _pasargard_create_customer(
