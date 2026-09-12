@@ -78,4 +78,4 @@ GUIDE_VIDEO_STREISAND = _s("GUIDE_VIDEO_STREISAND", os.path.join(_BASE_DIR, "tut
 
 # AI support
 GEMINI_API_KEY = _s("GEMINI_API_KEY")
-GEMINI_MODEL = _s("GEMINI_MODEL", "gemini-3.8-flash")
+GEMINI_MODEL = _s("GEMINI_MODEL", "gemini-3.6-flash")

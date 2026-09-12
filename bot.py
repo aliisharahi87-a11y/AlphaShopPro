@@ -1466,7 +1466,7 @@ Streisand و مشکلات اتصال کمک کن.
 
     history[:] = history[-8:]
 
-    model = (GEMINI_MODEL or "gemini-3.8-flash").strip()
+    model = (GEMINI_MODEL or "gemini-3.6-flash").strip()
 
     if model.startswith("models/"):
         model = model[len("models/"):]
