@@ -1666,21 +1666,49 @@ Streisand و مشکلات اتصال کمک کن.
                 f"{type(edit_error).__name__}: {edit_error}",
                 flush=True,
             )
-            await update.message.reply_text(answer)
+            try:
+                await update.message.reply_text(answer)
+            except Exception as reply_error:
+                print(
+                    f"⚠️ ANSWER REPLY FAILED: "
+                    f"{type(reply_error).__name__}: {reply_error}",
+                    flush=True,
+                )
 
     except Exception as e:
         print(
             f"❌ Gemini final error: "
-            f"{type(e).__name__}: {e}"
+            f"{type(e).__name__}: {e}",
+            flush=True,
         )
 
         # هیچ وقت پیام روی "در حال فکر کردن" باقی نمی‌ماند.
-        await thinking_message.edit_text(
-            "⚠️ فعلاً هوش مصنوعی در دسترس نیست.\n\n"
-            "لطفاً چند ثانیه بعد دوباره امتحان کن.\n"
-            "اگر مشکل ادامه داشت، با پشتیبانی تماس بگیر:\n"
-            "@AlphaShopSupport"
-        )
+        try:
+            await thinking_message.edit_text(
+                "⚠️ فعلاً هوش مصنوعی در دسترس نیست.\n\n"
+                "لطفاً چند ثانیه بعد دوباره امتحان کن.\n"
+                "اگر مشکل ادامه داشت، با پشتیبانی تماس بگیر:\n"
+                "@AlphaShopSupport"
+            )
+        except Exception as final_error:
+            print(
+                f"⚠️ FINAL THINKING MESSAGE EDIT FAILED: "
+                f"{type(final_error).__name__}: {final_error}",
+                flush=True,
+            )
+            try:
+                await update.message.reply_text(
+                    "⚠️ فعلاً هوش مصنوعی در دسترس نیست.\n\n"
+                    "لطفاً چند ثانیه بعد دوباره امتحان کن.\n"
+                    "اگر مشکل ادامه داشت، با پشتیبانی تماس بگیر:\n"
+                    "@AlphaShopSupport"
+                )
+            except Exception as reply_error:
+                print(
+                    f"⚠️ FINAL REPLY FAILED: "
+                    f"{type(reply_error).__name__}: {reply_error}",
+                    flush=True,
+                )
 
 
 async def end_ai_mode(update, context):
