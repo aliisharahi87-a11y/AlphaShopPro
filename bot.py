@@ -1415,7 +1415,14 @@ async def support_ai_callback(update, context):
     await q.message.reply_text(tr(uid, "support_ai_intro"), parse_mode="HTML", reply_markup=menu(uid))
 
 async def ai_support_message(update, context):
+    print(
+        f"🤖 AI handler received message | "
+        f"user={update.effective_user.id if update.effective_user else 'unknown'} | "
+        f"ai_mode={context.user_data.get('support_ai_mode')}"
+    )
+
     if not context.user_data.get("support_ai_mode"):
+        print("⚠️ AI handler ignored message because support_ai_mode is OFF")
         return
 
     uid = update.effective_user.id
