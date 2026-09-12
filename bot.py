@@ -1658,7 +1658,15 @@ Streisand و مشکلات اتصال کمک کن.
         history[:] = history[-8:]
 
         # همان پیام را ویرایش می‌کنیم
-        await thinking_message.edit_text(answer)
+        try:
+            await thinking_message.edit_text(answer)
+        except Exception as edit_error:
+            print(
+                f"⚠️ THINKING MESSAGE EDIT FAILED: "
+                f"{type(edit_error).__name__}: {edit_error}",
+                flush=True,
+            )
+            await update.message.reply_text(answer)
 
     except Exception as e:
         print(
