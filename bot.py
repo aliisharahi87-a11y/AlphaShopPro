@@ -1417,37 +1417,125 @@ async def support_ai_callback(update, context):
 async def ai_support_message(update, context):
     if not context.user_data.get("support_ai_mode"):
         return
+
     uid = update.effective_user.id
     text = (update.message.text or "").strip()
+
     if not text:
         return
-    history = context.user_data.setdefault("support_ai_history", [])
-    system_prompt = ("You are Alpha Shop customer support. Answer politely and practically. "
-                     "Help with buying services, wallet deposits, subscriptions, V2Box, Hiddify, Happ, Streisand and basic troubleshooting. "
-                     "Never invent prices, payment details, credentials, policies or refunds. If a human is needed, direct the user to @AlphaShopSupport. "
-                     "Reply in Persian for Persian messages and English for English messages. "
-                     "Alpha Shop channel: @alphashopss. Support: @AlphaShopSupport.")
-    history.append({"role": "user", "parts": [{"text": text}]})
-    history[:] = history[-8:]
-    payload = {"system_instruction": {"parts": [{"text": system_prompt}]}, "contents": history, "generationConfig": {"temperature": 0.4, "maxOutputTokens": 700}}
-    await update.message.chat.send_action("typing")
-    url = f"https://generativelanguage.googleapis.com/v1beta/models/{GEMINI_MODEL}:generateContent?key={GEMINI_API_KEY}"
-    try:
-        async with aiohttp.ClientSession(timeout=aiohttp.ClientTimeout(total=35)) as session:
-            async with session.post(url, json=payload) as resp:
-                data = await resp.json(content_type=None)
-                if resp.status >= 400:
-                    raise RuntimeError(data.get("error", {}).get("message", "Gemini request failed"))
-        parts = data.get("candidates", [{}])[0].get("content", {}).get("parts", [])
-        answer = "".join(p.get("text", "") for p in parts).strip()
-        if not answer:
-            raise RuntimeError("Empty AI response")
-        history.append({"role": "model", "parts": [{"text": answer}]})
-        history[:] = history[-8:]
-        await update.message.reply_text(answer)
-    except Exception as exc:
-        print(f"❌ AI support error: {exc}")
+
+    if not GEMINI_API_KEY:
+        print("❌ GEMINI_API_KEY is missing in environment")
         await update.message.reply_text(tr(uid, "support_ai_error"))
+        return
+
+    history = context.user_data.setdefault("support_ai_history", [])
+
+    system_prompt = (
+        "You are Alpha Shop customer support. "
+        "Answer politely and practically. "
+        "Help with buying services, wallet deposits, subscriptions, "
+        "V2Box, Hiddify, Happ, Streisand and basic troubleshooting. "
+        "Never invent prices, payment details, credentials, policies or refunds. "
+        "If a human is needed, direct the user to @AlphaShopSupport. "
+        "Reply in Persian for Persian messages and English for English messages. "
+        "Alpha Shop channel: @alphashopss. "
+        "Support: @AlphaShopSupport."
+    )
+
+    history.append({
+        "role": "user",
+        "parts": [{"text": text}]
+    })
+    history[:] = history[-8:]
+
+    payload = {
+        "system_instruction": {
+            "parts": [{"text": system_prompt}]
+        },
+        "contents": history,
+        "generationConfig": {
+            "temperature": 0.4,
+            "maxOutputTokens": 700
+        }
+    }
+
+    await update.message.chat.send_action("typing")
+
+    model = (GEMINI_MODEL or "gemini-2.5-flash").strip()
+    url = (
+        f"https://generativelanguage.googleapis.com/"
+        f"v1beta/models/{model}:generateContent"
+    )
+
+    headers = {
+        "Content-Type": "application/json",
+        "x-goog-api-key": GEMINI_API_KEY,
+    }
+
+    try:
+        timeout = aiohttp.ClientTimeout(total=35)
+
+        async with aiohttp.ClientSession(timeout=timeout) as session:
+            async with session.post(
+                url,
+                headers=headers,
+                json=payload
+            ) as resp:
+
+                raw = await resp.text()
+
+                print(f"🤖 Gemini HTTP status: {resp.status}")
+                print(f"🤖 Gemini model: {model}")
+
+                if resp.status >= 400:
+                    # Do NOT print the API key.
+                    print(f"❌ Gemini API error: {raw[:2000]}")
+                    raise RuntimeError(
+                        f"Gemini HTTP {resp.status}"
+                    )
+
+                try:
+                    data = await resp.json(content_type=None)
+                except Exception:
+                    print(f"❌ Gemini returned invalid JSON: {raw[:2000]}")
+                    raise RuntimeError("Invalid Gemini JSON response")
+
+        candidates = data.get("candidates") or []
+
+        if not candidates:
+            print(f"❌ Gemini returned no candidates: {str(data)[:2000]}")
+            raise RuntimeError("No candidates returned")
+
+        content = candidates[0].get("content") or {}
+        parts = content.get("parts") or []
+
+        answer = "".join(
+            part.get("text", "")
+            for part in parts
+            if isinstance(part, dict)
+        ).strip()
+
+        if not answer:
+            print(f"❌ Gemini empty response: {str(data)[:2000]}")
+            raise RuntimeError("Empty AI response")
+
+        history.append({
+            "role": "model",
+            "parts": [{"text": answer}]
+        })
+        history[:] = history[-8:]
+
+        await update.message.reply_text(answer)
+
+    except aiohttp.ClientError as exc:
+        print(f"❌ Gemini network error: {type(exc).__name__}: {exc}")
+        await update.message.reply_text(tr(uid, "support_ai_error"))
+
+    except Exception as exc:
+        print(f"❌ AI support error: {type(exc).__name__}: {exc}")
+        await update.message.reply_text(tr(uid, "support_ai_error"))
+
 
 async def end_ai_mode(update, context):
     if context.user_data.get("support_ai_mode"):
