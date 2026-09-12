@@ -1584,12 +1584,27 @@ Streisand و مشکلات اتصال کمک کن.
                                 "No candidates"
                             )
 
-                        answer = (
-                            candidates[0]
-                            .get("content", {})
-                            .get("parts", [{}])[0]
-                            .get("text", "")
-                            .strip()
+                        answer_parts = []
+
+                        for candidate in candidates:
+                            content = candidate.get("content") or {}
+                            parts = content.get("parts") or []
+
+                            for part in parts:
+                                if not isinstance(part, dict):
+                                    continue
+
+                                text = part.get("text")
+
+                                if isinstance(text, str) and text.strip():
+                                    answer_parts.append(text.strip())
+
+                        answer = "\n".join(answer_parts).strip()
+
+                        print(
+                            "🧩 GEMINI TEXT PARTS:",
+                            len(answer_parts),
+                            flush=True,
                         )
 
                         if not answer:
