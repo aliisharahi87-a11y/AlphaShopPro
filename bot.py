@@ -1415,14 +1415,10 @@ async def support_ai_callback(update, context):
     await q.message.reply_text(tr(uid, "support_ai_intro"), parse_mode="HTML", reply_markup=menu(uid))
 
 async def ai_support_message(update, context):
-    print(
-        f"🤖 AI handler received message | "
-        f"user={update.effective_user.id if update.effective_user else 'unknown'} | "
-        f"ai_mode={context.user_data.get('support_ai_mode')}"
-    )
-
     if not context.user_data.get("support_ai_mode"):
-        print("⚠️ AI handler ignored message because support_ai_mode is OFF")
+        return
+
+    if not update.message:
         return
 
     uid = update.effective_user.id
@@ -1432,46 +1428,52 @@ async def ai_support_message(update, context):
         return
 
     if not GEMINI_API_KEY:
-        print("❌ GEMINI_API_KEY is missing in environment")
-        await update.message.reply_text(tr(uid, "support_ai_error"))
+        await update.message.reply_text(
+            tr(uid, "support_ai_no_key")
+        )
         return
 
-    history = context.user_data.setdefault("support_ai_history", [])
+    # Show a temporary thinking message.
+    thinking_message = await update.message.reply_text(
+        "🤔 در حال فکر کردن..."
+    )
+
+    history = context.user_data.setdefault(
+        "support_ai_history",
+        []
+    )
 
     system_prompt = (
-        "You are Alpha Shop customer support. "
-        "Answer politely and practically. "
-        "Help with buying services, wallet deposits, subscriptions, "
-        "V2Box, Hiddify, Happ, Streisand and basic troubleshooting. "
-        "Never invent prices, payment details, credentials, policies or refunds. "
-        "If a human is needed, direct the user to @AlphaShopSupport. "
-        "Reply in Persian for Persian messages and English for English messages. "
+        "You are Alpha Shop customer support AI. "
+        "Answer politely, naturally and practically. "
+        "Help users with Alpha Shop services, buying subscriptions, "
+        "wallet deposits, subscription links, V2Box, Hiddify, "
+        "Happ, Streisand and basic connection troubleshooting. "
+        "Never invent prices, payment information, credentials, "
+        "policies, refunds or unavailable features. "
+        "If the issue requires human support, direct the user to "
+        "@AlphaShopSupport. "
+        "Reply in Persian when the user writes Persian and in English "
+        "when the user writes English. "
         "Alpha Shop channel: @alphashopss. "
-        "Support: @AlphaShopSupport."
+        "Human support: @AlphaShopSupport. "
+        "Keep answers helpful and reasonably concise."
     )
 
     history.append({
         "role": "user",
         "parts": [{"text": text}]
     })
+
     history[:] = history[-8:]
 
-    payload = {
-        "system_instruction": {
-            "parts": [{"text": system_prompt}]
-        },
-        "contents": history,
-        "generationConfig": {
-            "temperature": 0.4,
-            "maxOutputTokens": 700
-        }
-    }
-
-    await update.message.chat.send_action("typing")
-
     model = (GEMINI_MODEL or "gemini-2.5-flash").strip()
+
+    if model.startswith("models/"):
+        model = model[len("models/"):]
+
     url = (
-        f"https://generativelanguage.googleapis.com/"
+        "https://generativelanguage.googleapis.com/"
         f"v1beta/models/{model}:generateContent"
     )
 
@@ -1480,10 +1482,24 @@ async def ai_support_message(update, context):
         "x-goog-api-key": GEMINI_API_KEY,
     }
 
+    payload = {
+        "system_instruction": {
+            "parts": [{"text": system_prompt}]
+        },
+        "contents": history,
+        "generationConfig": {
+            "temperature": 0.4,
+            "maxOutputTokens": 700,
+        },
+    }
+
     try:
         timeout = aiohttp.ClientTimeout(total=35)
 
-        async with aiohttp.ClientSession(timeout=timeout) as session:
+        async with aiohttp.ClientSession(
+            timeout=timeout
+        ) as session:
+
             async with session.post(
                 url,
                 headers=headers,
@@ -1492,27 +1508,43 @@ async def ai_support_message(update, context):
 
                 raw = await resp.text()
 
-                print(f"🤖 Gemini HTTP status: {resp.status}")
-                print(f"🤖 Gemini model: {model}")
+                print(
+                    f"🤖 Gemini HTTP status: {resp.status}"
+                )
+                print(
+                    f"🤖 Gemini model: {model}"
+                )
 
                 if resp.status >= 400:
-                    # Do NOT print the API key.
-                    print(f"❌ Gemini API error: {raw[:2000]}")
+                    print(
+                        f"❌ Gemini API error: {raw[:2000]}"
+                    )
                     raise RuntimeError(
-                        f"Gemini HTTP {resp.status}: {raw[:1200]}"
+                        f"Gemini HTTP {resp.status}"
                     )
 
                 try:
-                    data = await resp.json(content_type=None)
+                    data = await resp.json(
+                        content_type=None
+                    )
                 except Exception:
-                    print(f"❌ Gemini returned invalid JSON: {raw[:2000]}")
-                    raise RuntimeError("Invalid Gemini JSON response")
+                    print(
+                        f"❌ Gemini invalid JSON: {raw[:2000]}"
+                    )
+                    raise RuntimeError(
+                        "Invalid Gemini JSON response"
+                    )
 
         candidates = data.get("candidates") or []
 
         if not candidates:
-            print(f"❌ Gemini returned no candidates: {str(data)[:2000]}")
-            raise RuntimeError("No candidates returned")
+            print(
+                f"❌ Gemini returned no candidates: "
+                f"{str(data)[:2000]}"
+            )
+            raise RuntimeError(
+                "No candidates returned"
+            )
 
         content = candidates[0].get("content") or {}
         parts = content.get("parts") or []
@@ -1524,26 +1556,54 @@ async def ai_support_message(update, context):
         ).strip()
 
         if not answer:
-            print(f"❌ Gemini empty response: {str(data)[:2000]}")
-            raise RuntimeError("Empty AI response")
+            print(
+                f"❌ Gemini empty response: "
+                f"{str(data)[:2000]}"
+            )
+            raise RuntimeError(
+                "Empty AI response"
+            )
 
         history.append({
             "role": "model",
             "parts": [{"text": answer}]
         })
+
         history[:] = history[-8:]
 
-        await update.message.reply_text(answer)
+        # Replace the thinking message with the AI response.
+        await thinking_message.edit_text(answer)
+
+    except asyncio.TimeoutError:
+        print("❌ Gemini request timed out")
+
+        await thinking_message.edit_text(
+            "⏳ پاسخ‌گویی کمی طول کشید.\n"
+            "لطفاً چند لحظه بعد دوباره تلاش کنید."
+        )
 
     except aiohttp.ClientError as exc:
-        error_text = f"NetworkError: {type(exc).__name__}: {exc}"
-        print(f"❌ Gemini network error: {error_text}")
-        await update.message.reply_text(f"⚠️ خطای Gemini:\n<code>{error_text[:1000]}</code>", parse_mode="HTML")
+        print(
+            f"❌ Gemini network error: "
+            f"{type(exc).__name__}: {exc}"
+        )
+
+        await thinking_message.edit_text(
+            "⚠️ ارتباط با هوش مصنوعی موقتاً برقرار نشد.\n"
+            "لطفاً چند لحظه بعد دوباره تلاش کنید."
+        )
 
     except Exception as exc:
-        error_text = f"{type(exc).__name__}: {exc}"
-        print(f"❌ AI support error: {error_text}")
-        await update.message.reply_text(f"⚠️ خطای Gemini:\n<code>{error_text[:1000]}</code>", parse_mode="HTML")
+        print(
+            f"❌ AI support error: "
+            f"{type(exc).__name__}: {exc}"
+        )
+
+        await thinking_message.edit_text(
+            "⚠️ فعلاً نتونستم پاسخ مناسبی دریافت کنم.\n"
+            "لطفاً چند لحظه بعد دوباره تلاش کنید یا "
+            "با پشتیبانی انسانی در ارتباط باشید."
+        )
 
 
 async def end_ai_mode(update, context):
