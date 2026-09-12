@@ -1528,11 +1528,13 @@ Streisand و مشکلات اتصال کمک کن.
                     timeout=timeout
                 ) as session:
 
+                    print("🌐 BEFORE GEMINI HTTP POST", flush=True)
                     async with session.post(
                         url,
                         headers=headers,
                         json=payload,
                     ) as resp:
+                        print("🌐 GEMINI HTTP RESPONSE RECEIVED", flush=True)
 
                         raw = await resp.text()
 
