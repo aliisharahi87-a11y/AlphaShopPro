@@ -1414,6 +1414,8 @@ async def support_ai_callback(update, context):
         return
     context.user_data["support_ai_mode"] = True
     context.user_data["support_ai_history"] = []
+    print(f"🟢 AI MODE SET: {context.user_data.get('support_ai_mode')}", flush=True)
+    print(f"🟢 AI HISTORY SET: {context.user_data.get('support_ai_history')}", flush=True)
     await q.message.reply_text(tr(uid, "support_ai_intro"), parse_mode="HTML", reply_markup=menu(uid))
 
 async def ai_support_message(update, context):
