@@ -1404,9 +1404,11 @@ async def support_human_callback(update, context):
     await q.message.reply_text(ui(uid, f"👨‍💻 ارتباط با پشتیبانی انسانی:\n{support}", f"👨‍💻 Human support:\n{support}"), reply_markup=menu(uid))
 
 async def support_ai_callback(update, context):
+    print("🔥 AI CALLBACK CALLED", flush=True)
     q = update.callback_query
     await q.answer()
     uid = q.from_user.id
+    print(f"🔥 AI CALLBACK USER: {uid}", flush=True)
     if not GEMINI_API_KEY:
         await q.message.reply_text(tr(uid, "support_ai_no_key"), reply_markup=menu(uid))
         return
