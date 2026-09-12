@@ -1506,9 +1506,15 @@ Streisand و مشکلات اتصال کمک کن.
     answer = None
     last_error = None
 
+    print("🚀 GEMINI REQUEST BLOCK ENTERED", flush=True)
+    print(f"🔑 GEMINI KEY EXISTS: {bool(GEMINI_API_KEY)}", flush=True)
+    print(f"🤖 GEMINI MODEL: {model}", flush=True)
+    print(f"🌐 GEMINI URL: {url}", flush=True)
+
     try:
         # فقط یک درخواست اصلی + یک retry سریع
         for attempt in range(2):
+            print(f"🚀 GEMINI ATTEMPT {attempt + 1}", flush=True)
 
             try:
                 timeout = aiohttp.ClientTimeout(
