@@ -1536,7 +1536,9 @@ Streisand و مشکلات اتصال کمک کن.
                     ) as resp:
                         print("🌐 GEMINI HTTP RESPONSE RECEIVED", flush=True)
 
-                        raw = await resp.text()
+                        print("📥 BEFORE READING GEMINI BODY", flush=True)
+                        raw = await asyncio.wait_for(resp.text(), timeout=10.0)
+                        print("📥 GEMINI BODY READ", flush=True)
 
                         print(
                             f"🤖 Gemini HTTP {resp.status} "
