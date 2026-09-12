@@ -2118,7 +2118,7 @@ def run_bot():
     app.add_handler(CallbackQueryHandler(support_ai_callback, pattern=r"^support_ai$"))
 
     app.add_handler(MessageHandler(filters.Regex(r"^(🛒 خرید سرویس|🔄 تمدید سرویس|🎁 تست رایگان|💰 کیف پول|👥 زیرمجموعه‌گیری|🟣 سفارش‌های فعال|📞 پشتیبانی|⚙️ تنظیمات|📚 راهنما|🛒 Buy Service|🔄 Renew Service|🎁 Free Trial|💰 Wallet|👥 Referrals|🟣 Active Services|📞 Support|⚙️ Settings|📚 Guide)$"), end_ai_mode), group=-1)
-    app.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, ai_support_message), group=1)
+    app.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, ai_support_message), group=0)
 
     # Callback queries
     app.add_handler(
