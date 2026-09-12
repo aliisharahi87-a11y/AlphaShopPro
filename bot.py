@@ -1420,6 +1420,8 @@ async def support_ai_callback(update, context):
 
 async def ai_support_message(update, context):
     print("🔥 AI SUPPORT HANDLER CALLED", flush=True)
+    print(f"🔎 AI MESSAGE USER: {update.effective_user.id if update.effective_user else None}", flush=True)
+    print(f"🔎 AI CONTEXT DATA: {dict(context.user_data)}", flush=True)
     if not context.user_data.get("support_ai_mode"):
         print("⚠️ AI SUPPORT MODE IS OFF", flush=True)
         return
