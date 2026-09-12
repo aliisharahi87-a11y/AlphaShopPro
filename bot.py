@@ -1536,12 +1536,14 @@ async def ai_support_message(update, context):
         await update.message.reply_text(answer)
 
     except aiohttp.ClientError as exc:
-        print(f"❌ Gemini network error: {type(exc).__name__}: {exc}")
-        await update.message.reply_text(tr(uid, "support_ai_error"))
+        error_text = f"NetworkError: {type(exc).__name__}: {exc}"
+        print(f"❌ Gemini network error: {error_text}")
+        await update.message.reply_text(f"⚠️ خطای Gemini:\n<code>{error_text[:1000]}</code>", parse_mode="HTML")
 
     except Exception as exc:
-        print(f"❌ AI support error: {type(exc).__name__}: {exc}")
-        await update.message.reply_text(tr(uid, "support_ai_error"))
+        error_text = f"{type(exc).__name__}: {exc}"
+        print(f"❌ AI support error: {error_text}")
+        await update.message.reply_text(f"⚠️ خطای Gemini:\n<code>{error_text[:1000]}</code>", parse_mode="HTML")
 
 
 async def end_ai_mode(update, context):
