@@ -1499,7 +1499,7 @@ async def ai_support_message(update, context):
                     # Do NOT print the API key.
                     print(f"❌ Gemini API error: {raw[:2000]}")
                     raise RuntimeError(
-                        f"Gemini HTTP {resp.status}"
+                        f"Gemini HTTP {resp.status}: {raw[:1200]}"
                     )
 
                 try:
