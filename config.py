@@ -75,3 +75,7 @@ GUIDE_VIDEO_V2BOX = _s("GUIDE_VIDEO_V2BOX", os.path.join(_BASE_DIR, "tutorial_vi
 GUIDE_VIDEO_HAPP = _s("GUIDE_VIDEO_HAPP", os.path.join(_BASE_DIR, "tutorial_videos", "Happ.mp4"))
 GUIDE_VIDEO_HIDDIFY = _s("GUIDE_VIDEO_HIDDIFY", os.path.join(_BASE_DIR, "tutorial_videos", "Hiddify.mp4"))
 GUIDE_VIDEO_STREISAND = _s("GUIDE_VIDEO_STREISAND", os.path.join(_BASE_DIR, "tutorial_videos", "Streisand.mp4"))
+
+# AI support
+GEMINI_API_KEY = _s("GEMINI_API_KEY")
+GEMINI_MODEL = _s("GEMINI_MODEL", "gemini-2.5-flash")

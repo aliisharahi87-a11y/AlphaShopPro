@@ -4,6 +4,8 @@ import io
 import os
 from pathlib import Path
 
+import aiohttp
+
 import qrcode
 from PIL import Image
 
@@ -71,7 +73,28 @@ TEXT = {
         "panel_error": "⚠️ سفارش ثبت شد اما اتصال به پنل با موفقیت انجام نشد؛ مبلغ سفارش به کیف پول شما برگشت داده شد.\n\nلطفاً با پشتیبانی تماس بگیرید.",
         "ref": "👥 تعداد زیرمجموعه‌های شما: {count}\n🎁 درصد پاداش فعلی: {percent}%\n\n🔗 لینک دعوت شما:\n{link}",
         "no_orders": "📦 هنوز سفارشی ثبت نکرده‌اید.",
-        "support_text": "📞 پشتیبانی آلفا شاپ\n\nبرای ارتباط با پشتیبانی از آیدی زیر استفاده کنید:\n{support}",
+        "support_text": "🛟 <b>مرکز پشتیبانی آلفا شاپ</b>\n━━━━━━━━━━━━━━\n🌟 <b>چطور می‌توانیم کمکتان کنیم؟</b>\n\n📚 ابتدا سؤال متداول خود را انتخاب کنید.\n👨‍💻 برای مشکل اختصاصی با پشتیبانی در ارتباط باشید.\n🤖 برای پاسخ فوری با هوش مصنوعی گفتگو کنید.\n\n🟢 <b>پشتیبانی انسانی</b> برای مشکلات تخصصی\n🔵 <b>هوش مصنوعی</b> برای راهنمایی سریع\n━━━━━━━━━━━━━━\n💙 <i>اعتماد شما ، اعتبار ماست .</i>",
+        "faq_1": "💳 شارژ کیف پول",
+        "faq_2": "🛒 خرید سرویس",
+        "faq_3": "🔗 اتصال اشتراک",
+        "faq_4": "🛠️ مشکل اتصال",
+        "faq_5": "📦 حجم و مصرف",
+        "faq_6": "🔄 تمدید سرویس",
+        "faq_7": "🎁 تست رایگان",
+        "faq_8": "💬 زمان پاسخگویی",
+        "faq_a1": "💳 <b>شارژ کیف پول</b>\n\n1️⃣ وارد بخش «کیف پول» شوید.\n2️⃣ گزینه «افزایش موجودی» را بزنید.\n3️⃣ مبلغ موردنظر را وارد کنید.\n4️⃣ مبلغ را به کارت اعلام‌شده واریز کنید.\n5️⃣ تصویر واضح رسید را ارسال کنید.\n\nپس از بررسی و تأیید، موجودی کیف پول شما افزایش پیدا می‌کند.",
+        "faq_a2": "🛒 <b>خرید سرویس</b>\n\nاز «خرید سرویس» وارد بخش سرویس‌ها شوید، سرویس موردنظر را انتخاب کنید، حجم را مشخص کنید و با موجودی کیف پول پرداخت را تأیید کنید.\n\nبعد از ایجاد موفق سرویس، اطلاعات اتصال برای شما ارسال می‌شود.",
+        "faq_a3": "🔗 <b>اتصال اشتراک</b>\n\nلینک اشتراک را می‌توانید در برنامه‌هایی مثل <b>V2Box، Hiddify، Happ و Streisand</b> وارد کنید.\n\nاگر روش اتصال برنامه خود را نمی‌دانید، از بخش «راهنما» آموزش مربوطه را ببینید.",
+        "faq_a4": "🛠️ <b>مشکل اتصال</b>\n\nابتدا اینترنت را بررسی کنید، سپس برنامه را باز کنید و Subscription را Update کنید. اگر مشکل ادامه داشت، یک‌بار برنامه را ببندید و دوباره باز کنید.\n\nاگر همچنان مشکل وجود داشت، با پشتیبانی انسانی تماس بگیرید و در صورت امکان تصویر خطا را ارسال کنید.",
+        "faq_a5": "📦 <b>حجم و مصرف</b>\n\nحجم سرویس بر اساس پلنی است که هنگام خرید انتخاب کرده‌اید. مصرف اینترنت از حجم سرویس کم می‌شود و میزان باقی‌مانده را می‌توانید از اطلاعات سرویس بررسی کنید.\n\nاگر درباره مصرف غیرعادی سؤال دارید، مشخصات سرویس و تصویر صفحه مصرف را برای پشتیبانی ارسال کنید.",
+        "faq_a6": "🔄 <b>تمدید سرویس</b>\n\nاگر سرویس فعال داشته باشید، از بخش «تمدید سرویس» می‌توانید سرویس موردنظر را انتخاب و تمدید کنید. قبل از تأیید، مبلغ و مدت تمدید نمایش داده می‌شود.",
+        "faq_a7": "🎁 <b>تست رایگان</b>\n\nدر صورت فعال بودن تست رایگان، می‌توانید از بخش «تست رایگان» سرویس آزمایشی دریافت کنید. محدودیت و شرایط تست توسط سیستم اعمال می‌شود و معمولاً هر کاربر فقط یک‌بار می‌تواند از آن استفاده کند.",
+        "faq_a8": "💬 <b>پشتیبانی</b>\n\nبرای پاسخ سریع‌تر، ابتدا سؤال متداول مربوط به مشکل را بررسی کنید.\n\nاگر پاسخ کافی نبود، گزینه «ارتباط با پشتیبانی» را بزنید. همچنین می‌توانید از «هوش مصنوعی» برای راهنمایی فوری استفاده کنید.",
+        "support_human": "👨‍💻 ارتباط با پشتیبانی",
+        "support_ai": "🤖 هوش مصنوعی",
+        "support_ai_intro": "🤖 <b>پشتیبانی هوش مصنوعی آلفا</b>\n\nسؤالت را همین‌جا بفرست. درباره خرید، کیف پول، اشتراک و مشکلات اتصال راهنمایی‌ات می‌کنم.\n\nبرای خروج از چت، یکی از گزینه‌های منوی اصلی را انتخاب کن.",
+        "support_ai_no_key": "⚠️ بخش هوش مصنوعی هنوز روی سرور تنظیم نشده است. فعلاً با پشتیبانی انسانی در ارتباط باشید.",
+        "support_ai_error": "⚠️ در ارتباط با هوش مصنوعی مشکلی پیش آمد. لطفاً دوباره تلاش کنید یا با پشتیبانی انسانی ارتباط بگیرید.",
         "account": "👤 حساب کاربری\n\n🆔 شناسه: {id}\n💰 موجودی: {balance:,} تومان\n🌐 زبان: فارسی",
         "settings_text": "⚙️ تنظیمات حساب\n\nاز دکمه‌های زیر می‌توانید زبان حساب را تغییر دهید.",
         "language_changed": "🇮🇷 زبان حساب روی فارسی تنظیم شد.",
@@ -145,7 +168,28 @@ TEXT = {
         "panel_error": "⚠️ The order could not be provisioned through the panel. Your payment was refunded to your wallet.\n\nPlease contact support.",
         "ref": "👥 Your referrals: {count}\n🎁 Current reward: {percent}%\n\n🔗 Your referral link:\n{link}",
         "no_orders": "📦 You have no orders yet.",
-        "support_text": "📞 Alpha Shop Support\n\nContact us using:\n{support}",
+        "support_text": "🛟 <b>Alpha Shop Support Center</b>\n━━━━━━━━━━━━━━\n🌟 <b>How can we help you?</b>\n\n📚 Choose a frequently asked question first.\n👨‍💻 Contact human support for specific issues.\n🤖 Chat with AI for quick guidance.\n\n🟢 <b>Human Support</b> for specialized help\n🔵 <b>AI Support</b> for instant guidance\n━━━━━━━━━━━━━━\n💙 <i>Your trust, our reputation.</i>",
+        "faq_1": "💳 Wallet Balance",
+        "faq_2": "🛒 Buy a Service",
+        "faq_3": "🔗 Add Subscription",
+        "faq_4": "🛠️ Connection Issue",
+        "faq_5": "📦 Traffic Usage",
+        "faq_6": "🔄 Renew Service",
+        "faq_7": "🎁 Free Trial",
+        "faq_8": "💬 Support Response",
+        "faq_a1": "💳 <b>Wallet Balance</b>\n\n1️⃣ Open Wallet.\n2️⃣ Tap Add Balance.\n3️⃣ Enter the amount.\n4️⃣ Transfer the amount to the displayed card.\n5️⃣ Send a clear payment receipt.\n\nYour balance will be added after admin review and approval.",
+        "faq_a2": "🛒 <b>Buying a Service</b>\n\nOpen Buy Service, choose the service, select your desired volume and confirm the payment from your wallet.\n\nAfter successful provisioning, your connection information will be sent to you.",
+        "faq_a3": "🔗 <b>Adding a Subscription</b>\n\nYou can add the subscription link in apps such as <b>V2Box, Hiddify, Happ and Streisand</b>.\n\nIf you need help with a specific app, check the Guide section.",
+        "faq_a4": "🛠️ <b>Connection Issue</b>\n\nFirst check your internet connection, then open your VPN app and update the subscription. If the issue continues, restart the app.\n\nIf it still does not work, contact Human Support and send a screenshot of the error if possible.",
+        "faq_a5": "📦 <b>Traffic Usage</b>\n\nYour traffic limit depends on the plan you purchased. Internet usage is deducted from your service traffic.\n\nIf you notice unusual usage, send your service details and a screenshot to support.",
+        "faq_a6": "🔄 <b>Renewing a Service</b>\n\nIf you have an active service, open Renew Service and select the service you want to renew. The renewal price and duration are shown before confirmation.",
+        "faq_a7": "🎁 <b>Free Trial</b>\n\nIf a free trial is available, open Free Trial to request it. Trial availability and limits are controlled by the system and are normally limited to one use per user.",
+        "faq_a8": "💬 <b>Support</b>\n\nFor a faster solution, check the relevant FAQ first.\n\nIf it does not solve your problem, use Contact Support. You can also use Alpha AI for instant guidance.",
+        "support_human": "👨‍💻 Contact Support",
+        "support_ai": "🤖 AI Support",
+        "support_ai_intro": "🤖 <b>Alpha AI Support</b>\n\nSend your question here. I can help with purchases, wallet, subscriptions and basic connection issues.\n\nTo leave AI chat, choose any main-menu button.",
+        "support_ai_no_key": "⚠️ AI support is not configured on the server yet. Please contact human support for now.",
+        "support_ai_error": "⚠️ Something went wrong while contacting AI. Please try again or contact human support.",
         "account": "👤 Account\n\n🆔 ID: {id}\n💰 Balance: {balance:,} Toman\n🌐 Language: English",
         "settings_text": "⚙️ Account Settings\n\nUse the buttons below to change your language.",
         "language_changed": "🇬🇧 Account language changed to English.",
@@ -973,22 +1017,9 @@ async def _complete_pending_purchase(update, context):
         return
 
     username = f"alpha_{uid}_{oid}"
-    try:
-        print(f"🛒 PURCHASE START uid={uid} order={oid} service={service} gb={gb} unlimited={unlimited}")
-        result = await create_customer(username, gb, unlimited, service=service)
-        print(f"🛒 PURCHASE RESULT: {result}")
-    except Exception as exc:
-        print(f"❌ PURCHASE EXCEPTION: {type(exc).__name__}: {exc!r}")
-        db.refund(oid, uid, price)
-        context.user_data.pop("pending_purchase", None)
-        await query.message.reply_text(
-            ui(uid, "❌ هنگام ساخت سرویس خطایی رخ داد و مبلغ به کیف پول شما برگشت.",
-               "❌ An error occurred while creating the service and your payment was refunded."),
-            reply_markup=menu(uid),
-        )
-        return
+    result = await create_customer(username, gb, unlimited, service=service)
 
-    if not result.get("ok"):
+    if not result["ok"]:
         db.refund(oid, uid, price)
         context.user_data.pop("pending_purchase", None)
         await query.message.reply_text(
@@ -1058,7 +1089,6 @@ async def _complete_pending_purchase(update, context):
 
 async def confirm_buy(update, context):
     query = update.callback_query
-    uid = query.from_user.id
     parts = query.data.split(":")
     try:
         if len(parts) == 3:
@@ -1285,12 +1315,144 @@ async def renew_cancel(update, context):
     await q.answer()
     await q.message.reply_text("❌ لغو شد." if lang(q.from_user.id) == "fa" else "❌ Cancelled.", reply_markup=menu(q.from_user.id))
 
+def support_keyboard(uid):
+    l = lang(uid)
+    if l == "fa":
+        faq_title = "📚 سؤالات متداول"
+        human_title = "👨‍💻 ارتباط با پشتیبانی"
+        ai_title = "🤖 گفت‌وگو با هوش مصنوعی"
+        channel_title = "📢 کانال آلفا شاپ"
+        back_title = "🏠 منوی اصلی"
+    else:
+        faq_title = "📚 Frequently Asked Questions"
+        human_title = "👨‍💻 Contact Human Support"
+        ai_title = "🤖 Chat with AI"
+        channel_title = "📢 Alpha Shop Channel"
+        back_title = "🏠 Main Menu"
+
+    rows = [
+        [InlineKeyboardButton(faq_title, callback_data="support_faq_title", style="primary")],
+    ]
+    for i in range(1, 9, 2):
+        rows.append([
+            InlineKeyboardButton(TEXT[l][f"faq_{i}"], callback_data=f"support_faq:{i}", style="primary"),
+            InlineKeyboardButton(TEXT[l][f"faq_{i+1}"], callback_data=f"support_faq:{i+1}", style="primary"),
+        ])
+    rows += [
+        [InlineKeyboardButton(human_title, callback_data="support_human", style="success")],
+        [InlineKeyboardButton(ai_title, callback_data="support_ai", style="primary")],
+        [
+            InlineKeyboardButton(channel_title, url="https://t.me/alphashopss", style="primary"),
+            InlineKeyboardButton(back_title, callback_data="support_main_menu", style="danger"),
+        ],
+    ]
+    return InlineKeyboardMarkup(rows)
+
 async def support(update, context):
     if not await gate(update, context):
         return
+    uid = update.effective_user.id
+    context.user_data.pop("support_ai_mode", None)
+    context.user_data.pop("support_ai_history", None)
     await update.message.reply_text(
-        tr(update.effective_user.id, "support_text", support=SUPPORT_USERNAME)
+        tr(uid, "support_text"),
+        parse_mode="HTML",
+        disable_web_page_preview=True,
+        reply_markup=support_keyboard(uid),
     )
+
+async def support_faq_callback(update, context):
+    q = update.callback_query
+    await q.answer()
+    uid = q.from_user.id
+    key = q.data.split(":", 1)[1]
+    l = lang(uid)
+    await q.message.reply_text(TEXT[l][f"faq_a{key}"], parse_mode="HTML", reply_markup=InlineKeyboardMarkup([
+        [InlineKeyboardButton("🔙 بازگشت به مرکز پشتیبانی" if l == "fa" else "🔙 Back to Support Center", callback_data="support_back", style="primary")]
+    ]))
+
+async def support_back_callback(update, context):
+    q = update.callback_query
+    await q.answer()
+    uid = q.from_user.id
+    await q.message.reply_text(
+        tr(uid, "support_text"),
+        parse_mode="HTML",
+        disable_web_page_preview=True,
+        reply_markup=support_keyboard(uid),
+    )
+
+async def support_faq_title_callback(update, context):
+    q = update.callback_query
+    await q.answer()
+
+async def support_main_menu_callback(update, context):
+    q = update.callback_query
+    await q.answer()
+    uid = q.from_user.id
+    context.user_data.pop("support_ai_mode", None)
+    context.user_data.pop("support_ai_history", None)
+    await q.message.reply_text(ui(uid, "🏠 به منوی اصلی برگشتید.", "🏠 Back to the main menu."), reply_markup=menu(uid))
+
+async def support_human_callback(update, context):
+    q = update.callback_query
+    await q.answer()
+    uid = q.from_user.id
+    context.user_data.pop("support_ai_mode", None)
+    context.user_data.pop("support_ai_history", None)
+    support = SUPPORT_USERNAME or "@AlphaShopSupport"
+    await q.message.reply_text(ui(uid, f"👨‍💻 ارتباط با پشتیبانی انسانی:\n{support}", f"👨‍💻 Human support:\n{support}"), reply_markup=menu(uid))
+
+async def support_ai_callback(update, context):
+    q = update.callback_query
+    await q.answer()
+    uid = q.from_user.id
+    if not GEMINI_API_KEY:
+        await q.message.reply_text(tr(uid, "support_ai_no_key"), reply_markup=menu(uid))
+        return
+    context.user_data["support_ai_mode"] = True
+    context.user_data["support_ai_history"] = []
+    await q.message.reply_text(tr(uid, "support_ai_intro"), parse_mode="HTML", reply_markup=menu(uid))
+
+async def ai_support_message(update, context):
+    if not context.user_data.get("support_ai_mode"):
+        return
+    uid = update.effective_user.id
+    text = (update.message.text or "").strip()
+    if not text:
+        return
+    history = context.user_data.setdefault("support_ai_history", [])
+    system_prompt = ("You are Alpha Shop customer support. Answer politely and practically. "
+                     "Help with buying services, wallet deposits, subscriptions, V2Box, Hiddify, Happ, Streisand and basic troubleshooting. "
+                     "Never invent prices, payment details, credentials, policies or refunds. If a human is needed, direct the user to @AlphaShopSupport. "
+                     "Reply in Persian for Persian messages and English for English messages. "
+                     "Alpha Shop channel: @alphashopss. Support: @AlphaShopSupport.")
+    history.append({"role": "user", "parts": [{"text": text}]})
+    history[:] = history[-8:]
+    payload = {"system_instruction": {"parts": [{"text": system_prompt}]}, "contents": history, "generationConfig": {"temperature": 0.4, "maxOutputTokens": 700}}
+    await update.message.chat.send_action("typing")
+    url = f"https://generativelanguage.googleapis.com/v1beta/models/{GEMINI_MODEL}:generateContent?key={GEMINI_API_KEY}"
+    try:
+        async with aiohttp.ClientSession(timeout=aiohttp.ClientTimeout(total=35)) as session:
+            async with session.post(url, json=payload) as resp:
+                data = await resp.json(content_type=None)
+                if resp.status >= 400:
+                    raise RuntimeError(data.get("error", {}).get("message", "Gemini request failed"))
+        parts = data.get("candidates", [{}])[0].get("content", {}).get("parts", [])
+        answer = "".join(p.get("text", "") for p in parts).strip()
+        if not answer:
+            raise RuntimeError("Empty AI response")
+        history.append({"role": "model", "parts": [{"text": answer}]})
+        history[:] = history[-8:]
+        await update.message.reply_text(answer)
+    except Exception as exc:
+        print(f"❌ AI support error: {exc}")
+        await update.message.reply_text(tr(uid, "support_ai_error"))
+
+async def end_ai_mode(update, context):
+    if context.user_data.get("support_ai_mode"):
+        context.user_data.pop("support_ai_mode", None)
+        context.user_data.pop("support_ai_history", None)
 
 
 async def account(update, context):
@@ -1853,6 +2015,15 @@ def run_bot():
     app.add_handler(
         CallbackQueryHandler(cancel_buy, pattern=r"^cancel_buy$")
     )
+
+    # Support callbacks
+    app.add_handler(CallbackQueryHandler(support_faq_callback, pattern=r"^support_faq:\d+$"))
+    app.add_handler(CallbackQueryHandler(support_back_callback, pattern=r"^support_back$"))
+    app.add_handler(CallbackQueryHandler(support_human_callback, pattern=r"^support_human$"))
+    app.add_handler(CallbackQueryHandler(support_ai_callback, pattern=r"^support_ai$"))
+
+    app.add_handler(MessageHandler(filters.Regex(r"^(🛒 خرید سرویس|🔄 تمدید سرویس|🎁 تست رایگان|💰 کیف پول|👥 زیرمجموعه‌گیری|🟣 سفارش‌های فعال|📞 پشتیبانی|⚙️ تنظیمات|📚 راهنما|🛒 Buy Service|🔄 Renew Service|🎁 Free Trial|💰 Wallet|👥 Referrals|🟣 Active Services|📞 Support|⚙️ Settings|📚 Guide)$"), end_ai_mode), group=-1)
+    app.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, ai_support_message), group=1)
 
     # Callback queries
     app.add_handler(
