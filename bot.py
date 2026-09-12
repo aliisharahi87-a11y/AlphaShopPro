@@ -1683,14 +1683,26 @@ Streisand و مشکلات اتصال کمک کن.
             flush=True,
         )
 
-        # هیچ وقت پیام روی "در حال فکر کردن" باقی نمی‌ماند.
-        try:
-            await thinking_message.edit_text(
-                "⚠️ فعلاً هوش مصنوعی در دسترس نیست.\n\n"
-                "لطفاً چند ثانیه بعد دوباره امتحان کن.\n"
-                "اگر مشکل ادامه داشت، با پشتیبانی تماس بگیر:\n"
+        # پیام مناسب برای quota یا خطاهای عادی Gemini
+        if "429" in str(e) or "quota" in str(e).lower():
+            error_message = (
+                "⚠️ سهمیه رایگان هوش مصنوعی فعلاً به پایان رسیده است.\\n\\n"
+                "لطفاً کمی بعد دوباره امتحان کنید.\\n"
+                "این مشکل موقتی است و ربطی به حساب، سفارش یا کیف پول شما ندارد.\\n\\n"
+                "👨‍💻 پشتیبانی: @AlphaShopSupport"
+            )
+        else:
+            error_message = (
+                "⚠️ فعلاً هوش مصنوعی در دسترس نیست.\\n\\n"
+                "لطفاً چند ثانیه بعد دوباره امتحان کن.\\n"
+                "اگر مشکل ادامه داشت، با پشتیبانی تماس بگیر:\\n"
                 "@AlphaShopSupport"
             )
+
+        # هیچ وقت پیام روی "در حال فکر کردن" باقی نمی‌ماند.
+        try:
+            await thinking_message.edit_text(error_message)
+
         except Exception as final_error:
             print(
                 f"⚠️ FINAL THINKING MESSAGE EDIT FAILED: "
