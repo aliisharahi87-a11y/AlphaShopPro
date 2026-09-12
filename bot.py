@@ -1433,7 +1433,6 @@ async def ai_support_message(update, context):
         )
         return
 
-    # Show a temporary thinking message.
     thinking_message = await update.message.reply_text(
         "🤔 در حال فکر کردن..."
     )
@@ -1493,117 +1492,150 @@ async def ai_support_message(update, context):
         },
     }
 
-    try:
-        timeout = aiohttp.ClientTimeout(total=35)
+    max_attempts = 3
+    answer = None
 
-        async with aiohttp.ClientSession(
-            timeout=timeout
-        ) as session:
+    for attempt in range(1, max_attempts + 1):
+        try:
+            timeout = aiohttp.ClientTimeout(total=35)
 
-            async with session.post(
-                url,
-                headers=headers,
-                json=payload
-            ) as resp:
+            async with aiohttp.ClientSession(
+                timeout=timeout
+            ) as session:
 
-                raw = await resp.text()
+                async with session.post(
+                    url,
+                    headers=headers,
+                    json=payload
+                ) as resp:
 
-                print(
-                    f"🤖 Gemini HTTP status: {resp.status}"
-                )
-                print(
-                    f"🤖 Gemini model: {model}"
-                )
+                    raw = await resp.text()
 
-                if resp.status >= 400:
                     print(
-                        f"❌ Gemini API error: {raw[:2000]}"
-                    )
-                    raise RuntimeError(
-                        f"Gemini HTTP {resp.status}"
+                        f"🤖 Gemini attempt {attempt}/{max_attempts} "
+                        f"| HTTP {resp.status} | model={model}"
                     )
 
-                try:
-                    data = await resp.json(
-                        content_type=None
-                    )
-                except Exception:
-                    print(
-                        f"❌ Gemini invalid JSON: {raw[:2000]}"
-                    )
-                    raise RuntimeError(
-                        "Invalid Gemini JSON response"
-                    )
+                    if resp.status >= 400:
+                        print(
+                            f"❌ Gemini API error: {raw[:2000]}"
+                        )
 
-        candidates = data.get("candidates") or []
+                        # Retry temporary server/rate-limit errors.
+                        if resp.status in (429, 500, 502, 503, 504):
+                            if attempt < max_attempts:
+                                wait_time = 2 ** attempt
+                                print(
+                                    f"🔄 Gemini temporary error. "
+                                    f"Retrying in {wait_time}s..."
+                                )
+                                await asyncio.sleep(wait_time)
+                                continue
 
-        if not candidates:
+                        raise RuntimeError(
+                            f"Gemini HTTP {resp.status}"
+                        )
+
+                    try:
+                        data = await resp.json(
+                            content_type=None
+                        )
+                    except Exception:
+                        print(
+                            f"❌ Gemini invalid JSON: {raw[:2000]}"
+                        )
+
+                        if attempt < max_attempts:
+                            wait_time = 2 ** attempt
+                            await asyncio.sleep(wait_time)
+                            continue
+
+                        raise RuntimeError(
+                            "Invalid Gemini JSON response"
+                        )
+
+            candidates = data.get("candidates") or []
+
+            if not candidates:
+                print(
+                    f"❌ Gemini returned no candidates: "
+                    f"{str(data)[:2000]}"
+                )
+
+                if attempt < max_attempts:
+                    wait_time = 2 ** attempt
+                    await asyncio.sleep(wait_time)
+                    continue
+
+                raise RuntimeError(
+                    "No candidates returned"
+                )
+
+            content = candidates[0].get("content") or {}
+            parts = content.get("parts") or []
+
+            answer = "".join(
+                part.get("text", "")
+                for part in parts
+                if isinstance(part, dict)
+            ).strip()
+
+            if not answer:
+                print(
+                    f"❌ Gemini empty response: "
+                    f"{str(data)[:2000]}"
+                )
+
+                if attempt < max_attempts:
+                    wait_time = 2 ** attempt
+                    await asyncio.sleep(wait_time)
+                    continue
+
+                raise RuntimeError(
+                    "Empty AI response"
+                )
+
+            break
+
+        except asyncio.TimeoutError:
             print(
-                f"❌ Gemini returned no candidates: "
-                f"{str(data)[:2000]}"
-            )
-            raise RuntimeError(
-                "No candidates returned"
+                f"⏳ Gemini timeout on attempt "
+                f"{attempt}/{max_attempts}"
             )
 
-        content = candidates[0].get("content") or {}
-        parts = content.get("parts") or []
+            if attempt < max_attempts:
+                wait_time = 2 ** attempt
+                await asyncio.sleep(wait_time)
+                continue
 
-        answer = "".join(
-            part.get("text", "")
-            for part in parts
-            if isinstance(part, dict)
-        ).strip()
+            raise
 
-        if not answer:
+        except aiohttp.ClientError as exc:
             print(
-                f"❌ Gemini empty response: "
-                f"{str(data)[:2000]}"
-            )
-            raise RuntimeError(
-                "Empty AI response"
+                f"❌ Gemini network error on attempt "
+                f"{attempt}/{max_attempts}: "
+                f"{type(exc).__name__}: {exc}"
             )
 
-        history.append({
-            "role": "model",
-            "parts": [{"text": answer}]
-        })
+            if attempt < max_attempts:
+                wait_time = 2 ** attempt
+                await asyncio.sleep(wait_time)
+                continue
 
-        history[:] = history[-8:]
+            raise
 
-        # Replace the thinking message with the AI response.
-        await thinking_message.edit_text(answer)
+    if not answer:
+        raise RuntimeError("Gemini did not return an answer")
 
-    except asyncio.TimeoutError:
-        print("❌ Gemini request timed out")
+    history.append({
+        "role": "model",
+        "parts": [{"text": answer}]
+    })
 
-        await thinking_message.edit_text(
-            "⏳ پاسخ‌گویی کمی طول کشید.\n"
-            "لطفاً چند لحظه بعد دوباره تلاش کنید."
-        )
+    history[:] = history[-8:]
 
-    except aiohttp.ClientError as exc:
-        print(
-            f"❌ Gemini network error: "
-            f"{type(exc).__name__}: {exc}"
-        )
-
-        await thinking_message.edit_text(
-            "⚠️ ارتباط با هوش مصنوعی موقتاً برقرار نشد.\n"
-            "لطفاً چند لحظه بعد دوباره تلاش کنید."
-        )
-
-    except Exception as exc:
-        print(
-            f"❌ AI support error: "
-            f"{type(exc).__name__}: {exc}"
-        )
-
-        await thinking_message.edit_text(
-            "⚠️ فعلاً نتونستم پاسخ مناسبی دریافت کنم.\n"
-            "لطفاً چند لحظه بعد دوباره تلاش کنید یا "
-            "با پشتیبانی انسانی در ارتباط باشید."
-        )
+    # Replace the thinking message with the final answer.
+    await thinking_message.edit_text(answer)
 
 
 async def end_ai_mode(update, context):
