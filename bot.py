@@ -1504,10 +1504,10 @@ Streisand و مشکلات اتصال کمک کن.
 
             try:
                 timeout = aiohttp.ClientTimeout(
-                    total=3.5,
-                    connect=1.5,
-                    sock_connect=1.5,
-                    sock_read=3.0,
+                    total=30.0,
+                    connect=5.0,
+                    sock_connect=5.0,
+                    sock_read=25.0,
                 )
 
                 async with aiohttp.ClientSession(
