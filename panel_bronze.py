@@ -298,6 +298,72 @@ async def _get_subscription_links(session, panel_url, headers, created_data, use
     return []
 
 
+async def _get_all_bronze_group_ids(session, panel_url, headers):
+    """Return every usable PasarGuard group id for Bronze."""
+    endpoints = (
+        f"{panel_url}/api/groups/simple",
+        f"{panel_url}/api/groups",
+        f"{panel_url}/api/group",
+    )
+
+    for endpoint in endpoints:
+        try:
+            async with session.get(endpoint, headers=headers) as response:
+                data = await _read_json(response)
+
+                print(f"🟤 BRONZE GROUP HTTP {response.status}: {endpoint}")
+                print(f"📥 BRONZE GROUP RESPONSE: {data}")
+
+                if response.status != 200:
+                    continue
+
+                items = data
+
+                if isinstance(data, dict):
+                    for key in ("groups", "items", "data", "results"):
+                        if isinstance(data.get(key), list):
+                            items = data[key]
+                            break
+
+                if not isinstance(items, list):
+                    continue
+
+                ids = []
+
+                for item in items:
+                    if not isinstance(item, dict):
+                        continue
+
+                    gid = (
+                        item.get("id")
+                        or item.get("group_id")
+                        or item.get("_id")
+                    )
+
+                    if gid is None or item.get("is_disabled") is True:
+                        continue
+
+                    try:
+                        gid = int(gid)
+                    except (TypeError, ValueError):
+                        continue
+
+                    if gid not in ids:
+                        ids.append(gid)
+
+                if ids:
+                    print(f"✅ BRONZE ALL GROUP IDS: {ids}")
+                    return ids
+
+        except (aiohttp.ClientError, asyncio.TimeoutError) as exc:
+            print(f"⚠️ BRONZE GROUP REQUEST FAILED: {endpoint}: {exc!r}")
+
+        except Exception as exc:
+            print(f"❌ BRONZE GROUP ERROR: {endpoint}: {exc!r}")
+
+    return []
+
+
 async def _pasargard_create_customer(
     username,
     gb,
@@ -340,6 +406,19 @@ async def _pasargard_create_customer(
                 "Accept": "application/json",
                 "Content-Type": "application/json",
             }
+
+            # Bronze uses PasarGuard.
+            # When no groups were explicitly supplied, assign all usable groups.
+            if service == "bronze" and not group_ids:
+                group_ids = await _get_all_bronze_group_ids(
+                    session,
+                    panel_url,
+                    headers,
+                )
+
+            group_ids = list(group_ids or [])
+
+            print(f"🎯 BRONZE GROUPS TO ASSIGN: {group_ids}")
 
             expire = (
                 datetime.now().astimezone() + timedelta(days=int(days))

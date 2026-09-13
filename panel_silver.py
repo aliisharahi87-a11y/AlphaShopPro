@@ -67,24 +67,79 @@ def _first_url(obj):
 
 def _protocols(data):
     out = {}
+
     if isinstance(data, dict):
         for proto, tags in data.items():
             p = str(proto).lower()
+
             if p in {"vless", "vmess", "trojan", "shadowsocks"}:
-                if isinstance(tags, list): vals = [str(x) for x in tags if x]
-                elif isinstance(tags, dict): vals = [str(k) for k in tags.keys()]
-                else: vals = []
-                if vals or tags == {}: out[p] = vals
+                vals = []
+
+                if isinstance(tags, list):
+                    for item in tags:
+                        if isinstance(item, dict):
+                            tag = (
+                                item.get("tag")
+                                or item.get("remark")
+                                or item.get("name")
+                            )
+                            if tag:
+                                vals.append(str(tag).strip())
+                        elif item:
+                            vals.append(str(item).strip())
+
+                elif isinstance(tags, dict):
+                    tag = (
+                        tags.get("tag")
+                        or tags.get("remark")
+                        or tags.get("name")
+                    )
+                    if tag:
+                        vals.append(str(tag).strip())
+                    else:
+                        vals.extend(
+                            str(k).strip()
+                            for k in tags.keys()
+                            if k
+                        )
+
+                elif tags:
+                    vals.append(str(tags).strip())
+
+                vals = list(dict.fromkeys(v for v in vals if v))
+
+                if vals or tags == {}:
+                    out[p] = vals
+
         if not out:
             for key in ("data", "inbounds", "result"):
-                if key in data: return _protocols(data[key])
+                if key in data:
+                    return _protocols(data[key])
+
     elif isinstance(data, list):
         for item in data:
             if isinstance(item, dict):
-                p = str(item.get("protocol") or item.get("type") or "").lower()
-                tag = item.get("tag") or item.get("remark") or item.get("name")
-                if p in {"vless", "vmess", "trojan", "shadowsocks"} and tag:
-                    out.setdefault(p, []).append(str(tag))
+                p = str(
+                    item.get("protocol")
+                    or item.get("type")
+                    or ""
+                ).lower()
+
+                tag = (
+                    item.get("tag")
+                    or item.get("remark")
+                    or item.get("name")
+                )
+
+                if (
+                    p in {"vless", "vmess", "trojan", "shadowsocks"}
+                    and tag
+                ):
+                    out.setdefault(p, []).append(str(tag).strip())
+
+    for proto in list(out):
+        out[proto] = list(dict.fromkeys(out[proto]))
+
     return out
 
 
@@ -120,77 +175,239 @@ async def _login(session, panel_url):
 
 
 async def create_customer(username, gb, unlimited=False, days=30, group_ids=None, note=""):
+    """
+    Create a Silver/Marzban user using all available inbounds by default.
+
+    SILVER_PROTOCOL:
+      all      -> use every available inbound/protocol
+      vless    -> use only VLESS
+      vmess    -> use only VMess
+      trojan   -> use only Trojan
+      shadowsocks -> use only Shadowsocks
+    """
     panel_url, _, _ = _config()
-    timeout = aiohttp.ClientTimeout(total=60, connect=12, sock_connect=12, sock_read=35)
+    timeout = aiohttp.ClientTimeout(
+        total=60,
+        connect=12,
+        sock_connect=12,
+        sock_read=35,
+    )
+
     async with aiohttp.ClientSession(timeout=timeout) as session:
         try:
             token = await _login(session, panel_url)
-            headers = {"Authorization": f"Bearer {token}", "Accept": "application/json", "Content-Type": "application/json"}
-            async with session.get(f"{panel_url}/api/inbounds", headers=headers) as r:
+
+            headers = {
+                "Authorization": f"Bearer {token}",
+                "Accept": "application/json",
+                "Content-Type": "application/json",
+            }
+
+            # Get every available Marzban inbound.
+            async with session.get(
+                f"{panel_url}/api/inbounds",
+                headers=headers,
+            ) as r:
                 inbound_data = await _json(r)
-                if r.status != 200: raise RuntimeError(f"Marzban /api/inbounds HTTP {r.status}: {inbound_data}")
+
+                if r.status != 200:
+                    raise RuntimeError(
+                        f"Marzban /api/inbounds HTTP {r.status}: {inbound_data}"
+                    )
+
             inbound_map = _protocols(inbound_data)
-            if not inbound_map: raise RuntimeError(f"Marzban returned no usable inbounds: {inbound_data}")
-            wanted = os.getenv("SILVER_PROTOCOL", "vless").strip().lower()
+
+            if not inbound_map:
+                raise RuntimeError(
+                    f"Marzban returned no usable inbounds: {inbound_data}"
+                )
+
+            wanted = os.getenv("SILVER_PROTOCOL", "all").strip().lower()
             wanted_name = os.getenv("SILVER_INBOUND_NAME", "").strip()
-            protocol = wanted if wanted in inbound_map else next(iter(inbound_map))
-            tags = inbound_map.get(protocol, [])
-            if wanted_name and wanted_name in tags: tags = [wanted_name]
+
+            # By default use ALL protocols/inbounds.
+            if wanted in ("", "all", "*", "auto"):
+                selected_map = {
+                    proto: list(tags)
+                    for proto, tags in inbound_map.items()
+                }
+            else:
+                if wanted not in inbound_map:
+                    raise RuntimeError(
+                        f"Requested Silver protocol '{wanted}' is not available. "
+                        f"Available: {', '.join(inbound_map.keys())}"
+                    )
+
+                selected_map = {
+                    wanted: list(inbound_map[wanted])
+                }
+
+            # Optional explicit inbound name filter.
+            if wanted_name:
+                filtered = {}
+                for proto, tags in selected_map.items():
+                    if wanted_name in tags:
+                        filtered[proto] = [wanted_name]
+
+                if filtered:
+                    selected_map = filtered
+
+            if not selected_map:
+                raise RuntimeError(
+                    f"No Silver inbounds selected. Available: {inbound_map}"
+                )
+
             limit = 0 if unlimited else int(float(gb) * GB)
             expire = int(time.time()) + int(days) * 86400
-            payload = {"username": str(username).strip(), "status": "active", "data_limit": limit, "expire": expire,
-                       "proxies": {protocol: _proxy(protocol)}, "inbounds": {protocol: tags}, "note": note or "AlphaShop Silver"}
+
+            # Build a proxy for EVERY selected protocol.
+            proxies = {}
+            for proto in selected_map:
+                proxies[proto] = _proxy(proto)
+
+            payload = {
+                "username": str(username).strip(),
+                "status": "active",
+                "data_limit": limit,
+                "expire": expire,
+                "proxies": proxies,
+                "inbounds": selected_map,
+                "note": note or "AlphaShop Silver",
+            }
+
+            print(f"🥈 SILVER INBOUNDS: {selected_map}")
+            print(f"🥈 SILVER PROTOCOLS: {list(selected_map.keys())}")
 
             async def post(p):
-                async with session.post(f"{panel_url}/api/user", headers=headers, json=p) as r:
+                async with session.post(
+                    f"{panel_url}/api/user",
+                    headers=headers,
+                    json=p,
+                ) as r:
                     return r.status, await _json(r)
 
             status, data = await post(payload)
+
             print(f"🥈 SILVER CREATE HTTP {status}: {data}")
-            if status >= 400 and tags:
-                payload["inbounds"] = {protocol: []}
-                status, data = await post(payload)
+
+            # If the panel rejects the combined configuration, retry
+            # without explicit inbounds. This keeps compatibility with
+            # Marzban installations that manage inbounds automatically.
+            if status >= 400 and selected_map:
+                fallback_payload = dict(payload)
+                fallback_payload["inbounds"] = {}
+
+                status, data = await post(fallback_payload)
+
+                print(
+                    f"🥈 SILVER ALL-INBOUND FALLBACK HTTP {status}: {data}"
+                )
+
+            # Final compatibility fallback: try each protocol separately.
             if status >= 400:
                 last = data
-                for p, p_tags in inbound_map.items():
-                    if p == protocol: continue
-                    trial = {**payload, "proxies": {p: _proxy(p)}, "inbounds": {p: p_tags}}
+
+                for proto, tags in selected_map.items():
+                    trial = dict(payload)
+                    trial["proxies"] = {proto: _proxy(proto)}
+                    trial["inbounds"] = {proto: tags}
+
                     st, dat = await post(trial)
-                    print(f"🥈 SILVER FALLBACK {p} HTTP {st}: {dat}")
+
+                    print(
+                        f"🥈 SILVER PROTOCOL FALLBACK {proto} "
+                        f"HTTP {st}: {dat}"
+                    )
+
                     last = dat
-                    if st in (200, 201, 409): status, data, protocol = st, dat, p; break
-                else: data = last
+
+                    if st in (200, 201, 409):
+                        status = st
+                        data = dat
+                        break
+                else:
+                    data = last
+
             if status == 409:
                 pass
             elif status not in (200, 201):
-                raise RuntimeError(f"Marzban create user HTTP {status}: {data}")
+                raise RuntimeError(
+                    f"Marzban create user HTTP {status}: {data}"
+                )
+
             connection = _normalize_connection_url(_first_url(data))
             user_data = data
+
             if not connection:
-                async with session.get(f"{panel_url}/api/user/{username}", headers=headers) as r:
+                async with session.get(
+                    f"{panel_url}/api/user/{username}",
+                    headers=headers,
+                ) as r:
                     user_data = await _json(r)
-                    if r.status == 200: connection = _first_url(user_data)
-            if not connection: raise RuntimeError(f"Marzban user created but no subscription_url returned: {user_data}")
-            merged = dict(data) if isinstance(data, dict) else {"response": data}
-            if isinstance(user_data, dict): merged["user"] = user_data
+
+                    if r.status == 200:
+                        connection = _first_url(user_data)
+
+            if not connection:
+                raise RuntimeError(
+                    "Marzban user created but no subscription_url returned: "
+                    f"{user_data}"
+                )
+
+            merged = (
+                dict(data)
+                if isinstance(data, dict)
+                else {"response": data}
+            )
+
+            if isinstance(user_data, dict):
+                merged["user"] = user_data
+
             # Silver subscription URL: force exactly one https://
             connection = str(connection or "").strip()
+
             while connection.startswith("https:/"):
                 connection = connection[7:]
+
             while connection.startswith("http:/"):
                 connection = connection[6:]
+
             connection = "https://" + connection.lstrip("/")
+
             if connection.startswith("https:///sub/"):
-                connection = "https://pan.linkesubs.com/sub/" + connection.split("/sub/", 1)[1]
+                connection = (
+                    "https://pan.linkesubs.com/sub/"
+                    + connection.split("/sub/", 1)[1]
+                )
             elif connection.startswith("https://sub/"):
-                connection = "https://pan.linkesubs.com/sub/" + connection.split("https://sub/", 1)[1]
+                connection = (
+                    "https://pan.linkesubs.com/sub/"
+                    + connection.split("https://sub/", 1)[1]
+                )
 
             merged["subscription_url"] = connection
-            merged["protocol_used"] = protocol
-            return {"ok": True, "data": merged, "username": str(username).strip(), "subscription_url": connection, "connection_details": connection, "config": connection}
+            merged["protocol_used"] = ",".join(selected_map.keys())
+            merged["inbounds_used"] = selected_map
+
+            return {
+                "ok": True,
+                "data": merged,
+                "username": str(username).strip(),
+                "subscription_url": connection,
+                "connection_details": connection,
+                "config": connection,
+            }
+
         except Exception as exc:
             print(f"❌ SILVER EXCEPTION: {exc!r}")
-            return {"ok": False, "data": {"error": str(exc)}, "subscription_url": "", "connection_details": "", "config": ""}
+
+            return {
+                "ok": False,
+                "data": {"error": str(exc)},
+                "subscription_url": "",
+                "connection_details": "",
+                "config": "",
+            }
 
 
 async def extend_customer(username, days=30):
