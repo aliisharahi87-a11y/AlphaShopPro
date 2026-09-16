@@ -270,27 +270,39 @@ async def send_connection_card(message, uid, title, connection, extra_lines=None
         )
         return
 
+    connection = str(connection).strip()
+
+    # Send the connection card normally.
     image = build_connection_image(connection)
     caption = connection_caption(uid, title, connection, extra_lines)
 
     if len(caption) > 1024:
-        # Keep the connection itself inside <code> so Telegram makes it copyable.
         short_title = html.escape(str(title))
-        connection_html = f"<code>{html.escape(str(connection))}</code>"
-
         caption = (
             short_title
             + "\n\n"
             + ui(uid, "🔗 اطلاعات اتصال:", "🔗 Connection information:")
-            + "\n"
-            + connection_html
         )
 
     await message.reply_photo(
         photo=image,
         caption=caption,
         parse_mode="HTML",
-        reply_markup=reply_markup
+    )
+
+    # Send the actual subscription link separately.
+    # This makes the link much easier to copy in Telegram.
+    connection_text = (
+        ui(uid, "🔗 لینک اشتراک:", "🔗 Subscription link:")
+        + "\n\n"
+        + f"<code>{html.escape(connection)}</code>"
+    )
+
+    await message.reply_text(
+        connection_text,
+        parse_mode="HTML",
+        reply_markup=reply_markup,
+        disable_web_page_preview=True,
     )
 
 def lang(uid):
