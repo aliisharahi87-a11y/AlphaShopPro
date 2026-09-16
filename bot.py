@@ -555,7 +555,8 @@ async def deposit_amount(update, context):
             card=CARD_NUMBER or "Not configured",
             holder=CARD_HOLDER or "Not configured",
             amount=amount,
-        )
+        ),
+        parse_mode="HTML",
     )
     return DEP_RECEIPT
 
