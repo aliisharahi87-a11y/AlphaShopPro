@@ -260,14 +260,38 @@ def connection_caption(uid, title, connection, extra_lines=None):
 
 async def send_connection_card(message, uid, title, connection, extra_lines=None, reply_markup=None):
     if not connection:
-        await message.reply_text(title + "\n\n" + ui(uid, "❌ اطلاعات اتصال از پنل دریافت نشد.", "❌ Connection information could not be retrieved from the panel."), reply_markup=reply_markup)
+        await message.reply_text(
+            title + "\n\n" + ui(
+                uid,
+                "❌ اطلاعات اتصال از پنل دریافت نشد.",
+                "❌ Connection information could not be retrieved from the panel."
+            ),
+            reply_markup=reply_markup
+        )
         return
+
     image = build_connection_image(connection)
     caption = connection_caption(uid, title, connection, extra_lines)
+
     if len(caption) > 1024:
-        # Telegram captions are limited; keep the full link but shorten optional metadata first.
-        caption = html.escape(title + "\n\n" + ui(uid, "🔗 اطلاعات اتصال:", "🔗 Connection information:") + "\n" + str(connection))
-    await message.reply_photo(photo=image, caption=caption, parse_mode="HTML", reply_markup=reply_markup)
+        # Keep the connection itself inside <code> so Telegram makes it copyable.
+        short_title = html.escape(str(title))
+        connection_html = f"<code>{html.escape(str(connection))}</code>"
+
+        caption = (
+            short_title
+            + "\n\n"
+            + ui(uid, "🔗 اطلاعات اتصال:", "🔗 Connection information:")
+            + "\n"
+            + connection_html
+        )
+
+    await message.reply_photo(
+        photo=image,
+        caption=caption,
+        parse_mode="HTML",
+        reply_markup=reply_markup
+    )
 
 def lang(uid):
     u = db.get_user(uid)
