@@ -6,3 +6,4 @@ __pycache__/
 *.db
 __pycache__/
 *.pyc
+.env echo pycache/ echo *.pyc
