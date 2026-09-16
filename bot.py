@@ -10,7 +10,7 @@ import aiohttp
 import qrcode
 from PIL import Image
 
-from telegram import ReactionTypeEmoji, Update, InlineKeyboardButton, InlineKeyboardMarkup, ReplyKeyboardMarkup, KeyboardButton
+from telegram import ReactionTypeEmoji, Update, InlineKeyboardButton, InlineKeyboardMarkup, ReplyKeyboardMarkup, KeyboardButton, CopyTextButton
 from telegram.ext import (
     Application,
     CallbackQueryHandler,
@@ -272,14 +272,13 @@ async def send_connection_card(message, uid, title, connection, extra_lines=None
 
     connection = str(connection).strip()
 
-    # Send the connection card normally.
+    # Connection card
     image = build_connection_image(connection)
     caption = connection_caption(uid, title, connection, extra_lines)
 
     if len(caption) > 1024:
-        short_title = html.escape(str(title))
         caption = (
-            short_title
+            html.escape(str(title))
             + "\n\n"
             + ui(uid, "🔗 اطلاعات اتصال:", "🔗 Connection information:")
         )
@@ -290,18 +289,22 @@ async def send_connection_card(message, uid, title, connection, extra_lines=None
         parse_mode="HTML",
     )
 
-    # Send the actual subscription link separately.
-    # This makes the link much easier to copy in Telegram.
-    connection_text = (
-        ui(uid, "🔗 لینک اشتراک:", "🔗 Subscription link:")
-        + "\n\n"
-        + f"<code>{html.escape(connection)}</code>"
-    )
+    # Real Telegram Copy button
+    copy_button = InlineKeyboardMarkup([
+        [
+            InlineKeyboardButton(
+                ui(uid, "📋 کپی لینک اشتراک", "📋 Copy subscription link"),
+                copy_text=CopyTextButton(text=connection)
+            )
+        ]
+    ])
 
     await message.reply_text(
-        connection_text,
+        ui(uid, "🔗 لینک اشتراک:", "🔗 Subscription link:")
+        + "\n\n"
+        + f"<code>{html.escape(connection)}</code>",
         parse_mode="HTML",
-        reply_markup=reply_markup,
+        reply_markup=copy_button,
         disable_web_page_preview=True,
     )
 
