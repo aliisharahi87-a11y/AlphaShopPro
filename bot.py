@@ -244,11 +244,18 @@ def build_connection_image(connection):
 
 
 def connection_caption(uid, title, connection, extra_lines=None):
-    lines = [title]
+    lines = [html.escape(str(title))]
+
     if extra_lines:
-        lines.extend(extra_lines)
-    lines.extend(["", ui(uid, "🔗 اطلاعات اتصال:", "🔗 Connection information:"), str(connection)])
-    return html.escape("\n".join(lines))
+        lines.extend(html.escape(str(x)) for x in extra_lines)
+
+    lines.extend([
+        "",
+        ui(uid, "🔗 اطلاعات اتصال:", "🔗 Connection information:"),
+        f"<code>{html.escape(str(connection))}</code>",
+    ])
+
+    return "\n".join(lines)
 
 
 async def send_connection_card(message, uid, title, connection, extra_lines=None, reply_markup=None):

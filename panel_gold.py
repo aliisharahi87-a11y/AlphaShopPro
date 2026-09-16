@@ -463,20 +463,49 @@ async def _pasargard_create_customer(
                         "config": "",
                     }
 
-            # 1) Try the creation response.
-            connection = _extract_connection(data, panel_url)
+            # 1) PasarGuard normally returns the subscription URL directly.
+            connection = ""
+            links = []
 
-            # 2) Fetch the newly-created user. This fixes panels that return
-            # only {id, username, ...} from POST /api/user.
+            if isinstance(data, dict):
+                direct_subscription = (
+                    data.get("subscription_url")
+                    or data.get("subscriptionUrl")
+                )
+                if direct_subscription:
+                    connection = str(direct_subscription).strip()
+                    links = [connection]
+
+            # 2) Fallback: extract a connection from the creation response.
+            if not connection:
+                connection = _extract_connection(data, panel_url)
+
+            # 3) Fallback: fetch the newly-created user.
             user_data = {}
             if not connection:
                 user_data = await _get_created_user(
-                    session, panel_url, headers, str(username).strip()
+                    session,
+                    panel_url,
+                    headers,
+                    str(username).strip(),
                 )
-                connection = _extract_connection(user_data, panel_url)
 
-            # 3) Pasargard fallback: explicitly request subscription links.
-            links = []
+                if isinstance(user_data, dict):
+                    direct_subscription = (
+                        user_data.get("subscription_url")
+                        or user_data.get("subscriptionUrl")
+                    )
+                    if direct_subscription:
+                        connection = str(direct_subscription).strip()
+                        links = [connection]
+
+                if not connection:
+                    connection = _extract_connection(
+                        user_data,
+                        panel_url,
+                    )
+
+            # 4) Final fallback: explicitly request subscription links.
             if not connection:
                 links = await _get_subscription_links(
                     session,
