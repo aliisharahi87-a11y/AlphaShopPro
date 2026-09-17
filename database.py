@@ -333,6 +333,23 @@ def charge_renewal(uid, oid, amount):
         return True
 
 
+def record_renewal_success(uid, oid, amount):
+    """Record a successfully completed renewal for mission tracking."""
+    with LOCK, conn() as c:
+        c.execute(
+            "INSERT INTO transactions(user_id,kind,amount,description,created_at) "
+            "VALUES(?,?,?,?,?)",
+            (
+                uid,
+                "renewal_success",
+                -int(amount),
+                f"Renewal success #{oid}",
+                int(time.time()),
+            ),
+        )
+        return True
+
+
 def refund_renewal(uid, amount, oid):
     with LOCK, conn() as c:
         c.execute("UPDATE users SET balance=balance+? WHERE id=?", (amount, uid))
@@ -681,3 +698,395 @@ def reset_trial(uid):
             "UPDATE users SET trial_used=0, trial_gold_used=0, trial_silver_used=0, trial_bronze_used=0 WHERE id=?",
             (uid,),
         )
+
+
+# ============================================================
+# ALPHA SHOP — MISSION SYSTEM
+# ============================================================
+
+def init_mission_db():
+    with LOCK, conn() as c:
+        c.executescript("""
+        CREATE TABLE IF NOT EXISTS mission_stages(
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            stage_key TEXT UNIQUE NOT NULL,
+            title_fa TEXT NOT NULL,
+            title_en TEXT NOT NULL,
+            reward_alc INTEGER NOT NULL DEFAULT 0,
+            active INTEGER NOT NULL DEFAULT 1,
+            sort_order INTEGER NOT NULL DEFAULT 0
+        );
+
+        CREATE TABLE IF NOT EXISTS missions(
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            stage_id INTEGER NOT NULL,
+            mission_key TEXT UNIQUE NOT NULL,
+            title_fa TEXT NOT NULL,
+            title_en TEXT NOT NULL,
+            mission_type TEXT NOT NULL,
+            target INTEGER NOT NULL DEFAULT 1,
+            active INTEGER NOT NULL DEFAULT 1,
+            sort_order INTEGER NOT NULL DEFAULT 0,
+            FOREIGN KEY(stage_id) REFERENCES mission_stages(id)
+        );
+
+        CREATE TABLE IF NOT EXISTS mission_stage_claims(
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            user_id INTEGER NOT NULL,
+            stage_id INTEGER NOT NULL,
+            claimed_at INTEGER NOT NULL,
+            UNIQUE(user_id, stage_id)
+        );
+        """)
+
+        stages = [
+            ("start", "🟢 شروع", "🟢 Start", 50, 1, 1),
+            ("active", "🔵 فعال", "🔵 Active", 250, 1, 2),
+            ("pro", "🟣 حرفه‌ای", "🟣 Professional", 450, 1, 3),
+            ("special", "🔥 ویژه", "🔥 Special", 500, 1, 4),
+        ]
+
+        for stage in stages:
+            c.execute(
+                """
+                INSERT OR IGNORE INTO mission_stages
+                (stage_key,title_fa,title_en,reward_alc,active,sort_order)
+                VALUES(?,?,?,?,?,?)
+                """,
+                stage,
+            )
+
+        stage_rows = {
+            row["stage_key"]: row["id"]
+            for row in c.execute(
+                "SELECT id,stage_key FROM mission_stages"
+            ).fetchall()
+        }
+
+        missions = [
+            (
+                stage_rows["start"],
+                "start_purchase",
+                "🛒 یک خرید موفق",
+                "🛒 One successful purchase",
+                "purchases",
+                1,
+                1,
+                1,
+            ),
+            (
+                stage_rows["start"],
+                "start_deposit",
+                "💳 یک بار شارژ کیف پول",
+                "💳 One wallet deposit",
+                "deposits",
+                1,
+                1,
+                2,
+            ),
+            (
+                stage_rows["start"],
+                "start_referral",
+                "👥 یک زیرمجموعه موفق",
+                "👥 One successful referral",
+                "referrals",
+                1,
+                1,
+                3,
+            ),
+
+            (
+                stage_rows["active"],
+                "active_purchase",
+                "🛒 سه خرید موفق",
+                "🛒 Three successful purchases",
+                "purchases",
+                3,
+                1,
+                1,
+            ),
+            (
+                stage_rows["active"],
+                "active_renewal",
+                "🔄 دو تمدید موفق",
+                "🔄 Two successful renewals",
+                "renewals",
+                2,
+                1,
+                2,
+            ),
+            (
+                stage_rows["active"],
+                "active_referral",
+                "👥 دو زیرمجموعه موفق",
+                "👥 Two successful referrals",
+                "referrals",
+                2,
+                1,
+                3,
+            ),
+
+            (
+                stage_rows["pro"],
+                "pro_purchase",
+                "🛒 پنج خرید موفق",
+                "🛒 Five successful purchases",
+                "purchases",
+                5,
+                1,
+                1,
+            ),
+            (
+                stage_rows["pro"],
+                "pro_renewal",
+                "🔄 پنج تمدید موفق",
+                "🔄 Five successful renewals",
+                "renewals",
+                5,
+                1,
+                2,
+            ),
+            (
+                stage_rows["pro"],
+                "pro_referral",
+                "👥 پنج زیرمجموعه موفق",
+                "👥 Five successful referrals",
+                "referrals",
+                5,
+                1,
+                3,
+            ),
+            (
+                stage_rows["pro"],
+                "pro_deposit",
+                "💳 سه بار شارژ کیف پول",
+                "💳 Three wallet deposits",
+                "deposits",
+                3,
+                1,
+                4,
+            ),
+        ]
+
+        for mission in missions:
+            c.execute(
+                """
+                INSERT OR IGNORE INTO missions
+                (stage_id,mission_key,title_fa,title_en,mission_type,target,active,sort_order)
+                VALUES(?,?,?,?,?,?,?,?)
+                """,
+                mission,
+            )
+
+        c.commit()
+
+
+def mission_stages():
+    with conn() as c:
+        return c.execute(
+            """
+            SELECT *
+            FROM mission_stages
+            WHERE active=1
+            ORDER BY sort_order,id
+            """
+        ).fetchall()
+
+
+def stage_missions(stage_id):
+    with conn() as c:
+        return c.execute(
+            """
+            SELECT *
+            FROM missions
+            WHERE stage_id=? AND active=1
+            ORDER BY sort_order,id
+            """,
+            (stage_id,),
+        ).fetchall()
+
+
+def mission_claimed(uid, stage_id):
+    with conn() as c:
+        row = c.execute(
+            """
+            SELECT 1
+            FROM mission_stage_claims
+            WHERE user_id=? AND stage_id=?
+            """,
+            (uid, stage_id),
+        ).fetchone()
+    return bool(row)
+
+
+def claim_mission_stage(uid, stage_id, reward):
+    with LOCK, conn() as c:
+        exists = c.execute(
+            """
+            SELECT 1
+            FROM mission_stage_claims
+            WHERE user_id=? AND stage_id=?
+            """,
+            (uid, stage_id),
+        ).fetchone()
+
+        if exists:
+            return False
+
+        c.execute(
+            """
+            INSERT INTO mission_stage_claims
+            (user_id,stage_id,claimed_at)
+            VALUES(?,?,?)
+            """,
+            (uid, stage_id, int(time.time())),
+        )
+
+        return True
+
+
+def mission_progress(uid, mission_type):
+    with conn() as c:
+        if mission_type == "purchases":
+            row = c.execute(
+                """
+                SELECT COUNT(*) AS n
+                FROM orders
+                WHERE user_id=? AND status='completed'
+                """,
+                (uid,),
+            ).fetchone()
+            return int(row["n"] or 0)
+
+        if mission_type == "renewals":
+            row = c.execute(
+                """
+                SELECT COUNT(*) AS n
+                FROM transactions
+                WHERE user_id=? AND kind='renewal_success'
+                """,
+                (uid,),
+            ).fetchone()
+            return int(row["n"] or 0)
+
+        if mission_type == "deposits":
+            row = c.execute(
+                """
+                SELECT COUNT(*) AS n
+                FROM transactions
+                WHERE user_id=? AND kind='deposit'
+                """,
+                (uid,),
+            ).fetchone()
+            return int(row["n"] or 0)
+
+        if mission_type == "referrals":
+            row = c.execute(
+                """
+                SELECT COUNT(*) AS n
+                FROM users
+                WHERE referrer=?
+                """,
+                (uid,),
+            ).fetchone()
+            return int(row["n"] or 0)
+
+    return 0
+
+def claim_mission_stage_reward(uid, stage_id, reward, description=""):
+    uid = int(uid)
+    stage_id = int(stage_id)
+    reward = int(reward or 0)
+
+    if reward <= 0:
+        return False
+
+    with LOCK, conn() as c:
+        # Already claimed?
+        existing = c.execute(
+            """
+            SELECT 1
+            FROM mission_stage_claims
+            WHERE user_id=? AND stage_id=?
+            """,
+            (uid, stage_id),
+        ).fetchone()
+
+        if existing:
+            return False
+
+        # Make sure the user exists.
+        user = c.execute(
+            "SELECT id FROM users WHERE id=?",
+            (uid,),
+        ).fetchone()
+
+        if not user:
+            return False
+
+        now = int(time.time())
+
+        # Record the claim first inside the same transaction.
+        c.execute(
+            """
+            INSERT INTO mission_stage_claims
+            (user_id, stage_id, claimed_at)
+            VALUES (?, ?, ?)
+            """,
+            (uid, stage_id, now),
+        )
+
+        # Award coins.
+        c.execute(
+            """
+            UPDATE users
+            SET alpha_coins=COALESCE(alpha_coins,0)+?
+            WHERE id=?
+            """,
+            (reward, uid),
+        )
+
+        # Record the reward in the Alpha Coin ledger.
+        c.execute(
+            """
+            INSERT INTO alpha_coin_ledger
+            (user_id, order_id, kind, amount, description, created_at)
+            VALUES (?, ?, ?, ?, ?, ?)
+            """,
+            (
+                uid,
+                None,
+                "mission_stage_reward",
+                reward,
+                description or f"Mission stage #{stage_id} reward",
+                now,
+            ),
+        )
+
+        return True
+
+def mission_stage_unlocked(uid, stage_id):
+    uid = int(uid)
+    stage_id = int(stage_id)
+
+    stages = mission_stages()
+
+    current_index = None
+
+    for i, stage in enumerate(stages):
+        if int(stage["id"]) == stage_id:
+            current_index = i
+            break
+
+    if current_index is None:
+        return False
+
+    # First stage is always unlocked.
+    if current_index == 0:
+        return True
+
+    previous_stage = stages[current_index - 1]
+    previous_id = int(previous_stage["id"])
+
+    # The previous stage must have been claimed.
+    return mission_claimed(uid, previous_id)

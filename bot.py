@@ -324,6 +324,7 @@ def menu(uid):
             [KeyboardButton(tr(uid, "buy"), style="danger")],
             [KeyboardButton(tr(uid, "renew"), style="danger"), KeyboardButton(tr(uid, "trial"), style="success")],
             [KeyboardButton(tr(uid, "wallet"), style="primary")],
+            [KeyboardButton(tr(uid, "profile"), style="primary")],
             [KeyboardButton(tr(uid, "refs"), style="primary"), KeyboardButton(tr(uid, "orders"), style="success")],
             [KeyboardButton(tr(uid, "support"), style="primary"), KeyboardButton(tr(uid, "settings"), style="primary")],
             [KeyboardButton(tr(uid, "guide"), style="primary")],
@@ -493,6 +494,14 @@ async def start(update, context):
             user,
         )
 
+        try:
+            await check_and_reward_missions(ref, context)
+        except Exception as mission_error:
+            print(
+                f"⚠️ Mission reward check failed after referral: "
+                f"{type(mission_error).__name__}: {mission_error}"
+            )
+
     if not await gate(update, context):
         return
 
@@ -616,50 +625,202 @@ async def wallet(update, context):
         parse_mode="HTML",
     )
 
-async def alpha_coin_callback(update, context):
+
+
+
+
+
+async def check_and_reward_missions(uid, context):
+    """
+    Check all mission stages and automatically reward completed
+    unlocked stages exactly once.
+    """
+    uid = int(uid)
+
+    try:
+        stages = db.mission_stages()
+
+        for stage in stages:
+            stage_id = int(stage["id"])
+
+            # Already rewarded.
+            if db.mission_claimed(uid, stage_id):
+                continue
+
+            # Previous stage must be claimed first.
+            if not db.mission_stage_unlocked(uid, stage_id):
+                continue
+
+            missions = db.stage_missions(stage_id)
+
+            # A stage with no missions is not automatically completed.
+            if not missions:
+                continue
+
+            all_completed = True
+
+            for mission in missions:
+                progress = db.mission_progress(
+                    uid,
+                    mission["mission_type"],
+                )
+                target = int(mission["target"])
+
+                if progress < target:
+                    all_completed = False
+                    break
+
+            if not all_completed:
+                continue
+
+            reward = int(stage["reward_alc"])
+
+            title = (
+                stage["title_fa"]
+                if lang(uid) == "fa"
+                else stage["title_en"]
+            )
+
+            if lang(uid) == "fa":
+                description = f"پاداش تکمیل مرحله {title}"
+            else:
+                description = f"Mission stage completion reward: {title}"
+
+            success = db.claim_mission_stage_reward(
+                uid,
+                stage_id,
+                reward,
+                description,
+            )
+
+            if not success:
+                continue
+
+            new_balance = db.get_alpha_coins(uid)
+
+            if lang(uid) == "fa":
+                text = (
+                    f"🎉 <b>مرحله {title} تکمیل شد!</b>\n\n"
+                    f"🏆 تمام مأموریت‌های این مرحله انجام شدند.\n"
+                    f"🪙 <b>{reward:,} ALC</b> به شما تعلق گرفت.\n\n"
+                    f"💰 موجودی Alpha Coin: "
+                    f"<b>{new_balance:,} ALC</b>"
+                )
+            else:
+                text = (
+                    f"🎉 <b>{title} completed!</b>\n\n"
+                    f"🏆 All missions in this stage are complete.\n"
+                    f"🪙 <b>{reward:,} ALC</b> has been added.\n\n"
+                    f"💰 Alpha Coin balance: "
+                    f"<b>{new_balance:,} ALC</b>"
+                )
+
+            try:
+                await context.bot.send_message(
+                    chat_id=uid,
+                    text=text,
+                    parse_mode="HTML",
+                )
+            except Exception as e:
+                print(
+                    f"⚠️ Mission reward notification failed "
+                    f"for {uid}: {type(e).__name__}: {e}"
+                )
+
+    except Exception as e:
+        print(
+            f"⚠️ Mission check failed for {uid}: "
+            f"{type(e).__name__}: {e}"
+        )
+
+async def mission_claim_callback(update, context):
     query = update.callback_query
     await query.answer()
 
     uid = query.from_user.id
-    coins = db.get_alpha_coins(uid)
-    rows = db.alpha_coin_history(uid, 15)
+
+    try:
+        stage_id = int(query.data.split(":")[1])
+    except (IndexError, ValueError):
+        return
+
+    stages = db.mission_stages()
+    stage = next(
+        (x for x in stages if int(x["id"]) == stage_id),
+        None,
+    )
+
+    if not stage:
+        await query.answer("❌ مرحله پیدا نشد.", show_alert=True)
+        return
+
+    missions = db.stage_missions(stage_id)
+
+    # Every mission must be completed.
+    if not missions:
+        await query.answer(
+            "⏳ این مرحله هنوز آماده دریافت نیست.",
+            show_alert=True,
+        )
+        return
+
+    for mission in missions:
+        progress = db.mission_progress(
+            uid,
+            mission["mission_type"],
+        )
+        target = int(mission["target"])
+
+        if progress < target:
+            await query.answer(
+                "⏳ هنوز همه مأموریت‌ها کامل نشده‌اند.",
+                show_alert=True,
+            )
+            return
+
+    reward = int(stage["reward_alc"])
+
+    title = (
+        stage["title_fa"]
+        if lang(uid) == "fa"
+        else stage["title_en"]
+    )
+
+    if lang(uid) == "fa":
+        description = f"پاداش تکمیل مرحله {title}"
+    else:
+        description = f"Mission stage completion reward: {title}"
+
+    success = db.claim_mission_stage_reward(
+        uid,
+        stage_id,
+        reward,
+        description,
+    )
+
+    if not success:
+        await query.answer(
+            "✅ این پاداش قبلاً دریافت شده است.",
+            show_alert=True,
+        )
+        return
 
     if lang(uid) == "fa":
         text = (
-            "🪙 <b>Alpha Coin</b>\n\n"
-            f"💰 موجودی: <b>{coins:,} ALC</b>\n"
-            f"💎 ارزش: <b>{coins * 100:,} تومان</b>\n\n"
-            "📜 <b>تاریخچه:</b>\n"
+            f"🎉 <b>مرحله {title} تکمیل شد!</b>\n\n"
+            f"🪙 <b>{reward:,} ALC</b> به موجودی شما اضافه شد.\n\n"
+            f"💰 موجودی جدید: "
+            f"<b>{db.get_alpha_coins(uid):,} ALC</b>"
         )
-
-        if not rows:
-            text += "هنوز تراکنشی ثبت نشده است."
-        else:
-            for row in rows:
-                amount = int(row["amount"])
-                sign = "+" if amount > 0 else ""
-                text += (
-                    f"\n{sign}{amount:,} ALC — "
-                    f"{row['description'] or row['kind']}"
-                )
+        back_text = "🎯 بازگشت به مأموریت‌ها"
     else:
         text = (
-            "🪙 <b>Alpha Coin</b>\n\n"
-            f"💰 Balance: <b>{coins:,} ALC</b>\n"
-            f"💎 Value: <b>{coins * 100:,} Toman</b>\n\n"
-            "📜 <b>History:</b>\n"
+            f"🎉 <b>{title} completed!</b>\n\n"
+            f"🪙 <b>{reward:,} ALC</b> has been added to your balance.\n\n"
+            f"💰 New balance: "
+            f"<b>{db.get_alpha_coins(uid):,} ALC</b>"
         )
-
-        if not rows:
-            text += "No transactions yet."
-        else:
-            for row in rows:
-                amount = int(row["amount"])
-                sign = "+" if amount > 0 else ""
-                text += (
-                    f"\n{sign}{amount:,} ALC — "
-                    f"{row['description'] or row['kind']}"
-                )
+        back_text = "🎯 Back to Missions"
 
     await query.message.reply_text(
         text,
@@ -667,14 +828,424 @@ async def alpha_coin_callback(update, context):
         reply_markup=InlineKeyboardMarkup([
             [
                 InlineKeyboardButton(
-                    "🔙 بازگشت" if lang(uid) == "fa" else "🔙 Back",
-                    callback_data="back_menu",
+                    back_text,
+                    callback_data="missions",
+                    style="success",
+                )
+            ]
+        ]),
+    )
+
+async def mission_stage_callback(update, context):
+    query = update.callback_query
+    await query.answer()
+
+    uid = query.from_user.id
+
+    try:
+        stage_id = int(query.data.split(":")[1])
+    except (IndexError, ValueError):
+        return
+
+    stages = db.mission_stages()
+    stage = next(
+        (x for x in stages if int(x["id"]) == stage_id),
+        None,
+    )
+
+    if not stage:
+        await query.answer(
+            "❌ مرحله پیدا نشد.",
+            show_alert=True,
+        )
+        return
+
+    # Check stage lock.
+    if not db.mission_stage_unlocked(uid, stage_id):
+        if lang(uid) == "fa":
+            await query.answer(
+                "🔒 این مرحله هنوز قفل است. ابتدا مرحله قبلی را کامل کنید.",
+                show_alert=True,
+            )
+        else:
+            await query.answer(
+                "🔒 This stage is locked. Complete the previous stage first.",
+                show_alert=True,
+            )
+        return
+
+    missions = db.stage_missions(stage_id)
+    claimed = db.mission_claimed(uid, stage_id)
+
+    all_completed = bool(missions)
+    lines = []
+
+    for mission in missions:
+        progress = db.mission_progress(
+            uid,
+            mission["mission_type"],
+        )
+
+        target = int(mission["target"])
+        shown_progress = min(progress, target)
+
+        if progress >= target:
+            icon = "✅"
+        elif progress > 0:
+            icon = "🔄"
+        else:
+            icon = "⬜"
+
+        title = (
+            mission["title_fa"]
+            if lang(uid) == "fa"
+            else mission["title_en"]
+        )
+
+        lines.append(
+            f"{icon} {title}\n"
+            f"   📊 {shown_progress}/{target}"
+        )
+
+        if progress < target:
+            all_completed = False
+
+    reward = int(stage["reward_alc"])
+
+    if lang(uid) == "fa":
+        title = stage["title_fa"]
+
+        if claimed:
+            status = "✅ پاداش این مرحله قبلاً دریافت شده است."
+        elif all_completed:
+            status = "🎁 تمام مأموریت‌ها تکمیل شده‌اند!"
+        else:
+            status = "🔄 مأموریت‌ها را تکمیل کنید."
+
+        text = (
+            f"🎯 <b>{title}</b>\n\n"
+            "📋 <b>مأموریت‌ها:</b>\n\n"
+            + "\n\n".join(lines)
+            + f"\n\n🏆 پاداش مرحله: <b>{reward:,} ALC</b>"
+            + f"\n\n{status}"
+        )
+
+        buttons = []
+
+        if claimed:
+            buttons.append([
+                InlineKeyboardButton(
+                    "✅ پاداش دریافت شده",
+                    callback_data="missions",
+                    style="success",
+                )
+            ])
+        elif all_completed:
+            buttons.append([
+                InlineKeyboardButton(
+                    f"🎁 دریافت {reward:,} ALC",
+                    callback_data=f"mission_claim:{stage_id}",
+                    style="success",
+                )
+            ])
+
+        buttons.append([
+            InlineKeyboardButton(
+                "🔙 بازگشت به مأموریت‌ها",
+                callback_data="missions",
+                style="primary",
+            )
+        ])
+
+    else:
+        title = stage["title_en"]
+
+        if claimed:
+            status = "✅ This stage reward has already been claimed."
+        elif all_completed:
+            status = "🎁 All missions completed!"
+        else:
+            status = "🔄 Complete the missions to unlock the reward."
+
+        text = (
+            f"🎯 <b>{title}</b>\n\n"
+            "📋 <b>Missions:</b>\n\n"
+            + "\n\n".join(lines)
+            + f"\n\n🏆 Stage reward: <b>{reward:,} ALC</b>"
+            + f"\n\n{status}"
+        )
+
+        buttons = []
+
+        if claimed:
+            buttons.append([
+                InlineKeyboardButton(
+                    "✅ Reward claimed",
+                    callback_data="missions",
+                    style="success",
+                )
+            ])
+        elif all_completed:
+            buttons.append([
+                InlineKeyboardButton(
+                    f"🎁 Claim {reward:,} ALC",
+                    callback_data=f"mission_claim:{stage_id}",
+                    style="success",
+                )
+            ])
+
+        buttons.append([
+            InlineKeyboardButton(
+                "🔙 Back to Missions",
+                callback_data="missions",
+                style="primary",
+            )
+        ])
+
+    await query.message.reply_text(
+        text,
+        parse_mode="HTML",
+        reply_markup=InlineKeyboardMarkup(buttons),
+    )
+
+async def missions_callback(update, context):
+    query = update.callback_query
+    await query.answer()
+
+    uid = query.from_user.id
+    stages = db.mission_stages()
+
+    keyboard = []
+
+    for index, stage in enumerate(stages):
+        stage_id = int(stage["id"])
+        missions = db.stage_missions(stage_id)
+
+        unlocked = db.mission_stage_unlocked(uid, stage_id)
+        claimed = db.mission_claimed(uid, stage_id)
+
+        completed = bool(missions)
+        has_progress = False
+
+        if not missions:
+            completed = False
+
+        for mission in missions:
+            progress = db.mission_progress(
+                uid,
+                mission["mission_type"],
+            )
+            target = int(mission["target"])
+
+            if progress > 0:
+                has_progress = True
+
+            if progress < target:
+                completed = False
+
+        title = (
+            stage["title_fa"]
+            if lang(uid) == "fa"
+            else stage["title_en"]
+        )
+
+        if not unlocked:
+            icon = "🔒"
+            style = "primary"
+        elif claimed:
+            icon = "✅"
+            style = "success"
+        elif completed:
+            icon = "🎁"
+            style = "success"
+        elif has_progress:
+            icon = "🔄"
+            style = "primary"
+        else:
+            icon = "⬜"
+            style = "primary"
+
+        keyboard.append([
+            InlineKeyboardButton(
+                f"{icon} {title}",
+                callback_data=f"mission_stage:{stage_id}",
+                style=style,
+            )
+        ])
+
+    if lang(uid) == "fa":
+        text = (
+            "🎯 <b>مأموریت‌ها</b>\n\n"
+            "با انجام مأموریت‌ها Alpha Coin دریافت کنید.\n\n"
+            "وضعیت‌ها:\n"
+            "⬜ شروع نشده\n"
+            "🔄 در حال انجام\n"
+            "🎁 آماده دریافت\n"
+            "✅ دریافت شده\n"
+            "🔒 قفل"
+        )
+        back_text = "🔙 بازگشت"
+    else:
+        text = (
+            "🎯 <b>Missions</b>\n\n"
+            "Complete missions and earn Alpha Coins.\n\n"
+            "Statuses:\n"
+            "⬜ Not started\n"
+            "🔄 In progress\n"
+            "🎁 Ready to claim\n"
+            "✅ Claimed\n"
+            "🔒 Locked"
+        )
+        back_text = "🔙 Back"
+
+    keyboard.append([
+        InlineKeyboardButton(
+            back_text,
+            callback_data="alpha_coin",
+            style="primary",
+        )
+    ])
+
+    await query.message.reply_text(
+        text,
+        parse_mode="HTML",
+        reply_markup=InlineKeyboardMarkup(keyboard),
+    )
+
+async def alpha_coin_history_callback(update, context):
+    query = update.callback_query
+    await query.answer()
+
+    uid = query.from_user.id
+    coins = db.get_alpha_coins(uid)
+    rows = db.alpha_coin_history(uid, 20)
+
+    if lang(uid) == "fa":
+        text = (
+            "📜 <b>تاریخچه Alpha Coin</b>\n\n"
+            f"💰 موجودی فعلی: <b>{coins:,} ALC</b>\n"
+        )
+
+        if not rows:
+            text += "\nهنوز تراکنشی ثبت نشده است."
+        else:
+            for row in rows:
+                amount = int(row["amount"])
+                sign = "+" if amount > 0 else ""
+                text += (
+                    f"\n{sign}{amount:,} ALC — "
+                    f"{row['description'] or row['kind']}"
+                )
+
+        back_text = "🔙 بازگشت"
+    else:
+        text = (
+            "📜 <b>Alpha Coin History</b>\n\n"
+            f"💰 Current balance: <b>{coins:,} ALC</b>\n"
+        )
+
+        if not rows:
+            text += "\nNo transactions yet."
+        else:
+            for row in rows:
+                amount = int(row["amount"])
+                sign = "+" if amount > 0 else ""
+                text += (
+                    f"\n{sign}{amount:,} ALC — "
+                    f"{row['description'] or row['kind']}"
+                )
+
+        back_text = "🔙 Back"
+
+    await query.message.reply_text(
+        text,
+        parse_mode="HTML",
+        reply_markup=InlineKeyboardMarkup([
+            [
+                InlineKeyboardButton(
+                    back_text,
+                    callback_data="alpha_coin",
                     style="primary",
                 )
             ]
         ]),
     )
 
+async def alpha_coin_callback(update, context):
+    query = update.callback_query
+    await query.answer()
+
+    uid = query.from_user.id
+    coins = db.get_alpha_coins(uid)
+
+    if lang(uid) == "fa":
+        text = (
+            "🪙 <b>Alpha Coin</b>\n\n"
+            f"💰 موجودی: <b>{coins:,} ALC</b>\n"
+            f"💎 ارزش: <b>{coins * 100:,} تومان</b>\n\n"
+            "یکی از گزینه‌های زیر را انتخاب کنید:"
+        )
+
+        keyboard = InlineKeyboardMarkup([
+            [
+                InlineKeyboardButton(
+                    "🎯 مأموریت‌ها",
+                    callback_data="missions",
+                    style="success",
+                )
+            ],
+            [
+                InlineKeyboardButton(
+                    "📜 تاریخچه سکه‌ها",
+                    callback_data="alpha_coin_history",
+                    style="primary",
+                )
+            ],
+            [
+                InlineKeyboardButton(
+                    "🔙 بازگشت",
+                    callback_data="back_menu",
+                    style="primary",
+                )
+            ],
+        ])
+    else:
+        text = (
+            "🪙 <b>Alpha Coin</b>\n\n"
+            f"💰 Balance: <b>{coins:,} ALC</b>\n"
+            f"💎 Value: <b>{coins * 100:,} Toman</b>\n\n"
+            "Choose an option:"
+        )
+
+        keyboard = InlineKeyboardMarkup([
+            [
+                InlineKeyboardButton(
+                    "🎯 Missions",
+                    callback_data="missions",
+                    style="success",
+                )
+            ],
+            [
+                InlineKeyboardButton(
+                    "📜 Coin History",
+                    callback_data="alpha_coin_history",
+                    style="primary",
+                )
+            ],
+            [
+                InlineKeyboardButton(
+                    "🔙 Back",
+                    callback_data="back_menu",
+                    style="primary",
+                )
+            ],
+        ])
+
+    await query.message.reply_text(
+        text,
+        parse_mode="HTML",
+        reply_markup=keyboard,
+    )
 
 async def deposit_start(update, context):
     query = update.callback_query
@@ -1292,6 +1863,15 @@ async def _complete_pending_purchase(update, context):
         str(config),
     )
 
+    # Check and automatically reward completed mission stages
+    try:
+        await check_and_reward_missions(uid, context)
+    except Exception as mission_error:
+        print(
+            f"⚠️ Mission reward check failed after purchase: "
+            f"{type(mission_error).__name__}: {mission_error}"
+        )
+
     # Alpha Coin rewards are calculated from the actual Toman paid
     # after discount AND after Alpha Coin usage.
     coin_rewards = {
@@ -1526,42 +2106,149 @@ async def active_order_detail(update, context):
     q = update.callback_query
     uid = q.from_user.id
     await q.answer()
+
     try:
         oid = int(q.data.split(":", 1)[1])
     except (ValueError, IndexError):
-        await q.message.reply_text(ui(uid, "❌ سفارش نامعتبر است.", "❌ Invalid order."), reply_markup=menu(uid))
+        await q.message.reply_text(
+            ui(uid, "❌ سفارش نامعتبر است.", "❌ Invalid order."),
+            reply_markup=menu(uid),
+        )
         return
+
     row = db.get_order(uid, oid)
+
     if not row or row["status"] != "completed" or not row["panel_username"]:
-        await q.message.reply_text(ui(uid, "❌ سرویس فعال پیدا نشد.", "❌ Active service not found."), reply_markup=menu(uid))
+        await q.message.reply_text(
+            ui(uid, "❌ سرویس فعال پیدا نشد.", "❌ Active service not found."),
+            reply_markup=menu(uid),
+        )
         return
-    info = await get_customer_info(row["panel_username"], row["service"] or "gold")
+
+    info = await get_customer_info(
+        row["panel_username"],
+        row["service"] or "gold",
+    )
+
     if not info.get("ok"):
-        await q.message.reply_text(ui(uid, "❌ دریافت اطلاعات سرویس از پنل انجام نشد. لطفاً بعداً دوباره تلاش کنید.", "❌ Could not retrieve service information from the panel. Please try again later."), reply_markup=menu(uid))
+        await q.message.reply_text(
+            ui(
+                uid,
+                "❌ دریافت اطلاعات سرویس از پنل انجام نشد. لطفاً بعداً دوباره تلاش کنید.",
+                "❌ Could not retrieve service information from the panel. Please try again later.",
+            ),
+            reply_markup=menu(uid),
+        )
         return
+
     expire = info.get("expire")
+
     if isinstance(expire, str):
         try:
             expire = int(float(expire))
         except ValueError:
             try:
                 from datetime import datetime
-                expire = int(datetime.fromisoformat(expire.replace("Z", "+00:00")).timestamp())
+                expire = int(
+                    datetime.fromisoformat(
+                        expire.replace("Z", "+00:00")
+                    ).timestamp()
+                )
             except Exception:
                 expire = None
+
     now = int(__import__("time").time())
+
     if not expire or expire <= now:
-        await q.message.reply_text(ui(uid, "❌ این سرویس دیگر فعال نیست.", "❌ This service is no longer active."), reply_markup=menu(uid))
+        await q.message.reply_text(
+            ui(
+                uid,
+                "⛔ این سرویس منقضی شده است.",
+                "⛔ This service has expired.",
+            ),
+            reply_markup=menu(uid),
+        )
         return
-    days_left = max(1, (int(expire) - now + 86399) // 86400)
-    gb = ui(uid, "نامحدود", "Unlimited") if row["gb"] is None else f"{row['gb']} GB"
+
+    remaining_seconds = int(expire) - now
+    days_left = max(1, (remaining_seconds + 86399) // 86400)
+
+    gb = (
+        ui(uid, "نامحدود", "Unlimited")
+        if row["gb"] is None
+        else f"{row['gb']} GB"
+    )
+
     connection = info.get("subscription_url") or row["config"] or ""
-    service_label = TEXT[lang(uid)].get(str(row["service"]), str(row["service"]).title())
-    if lang(uid) == "fa":
-        text = (f"🟣 <b>سرویس فعال شما</b>\n\n🧾 سفارش: #{oid}\n🔌 سرویس: {service_label}\n📦 سرویس: {gb}\n⏳ روز باقی‌مانده: <b>{days_left} روز</b>\n👤 نام کاربری: <code>{html.escape(str(row['panel_username']))}</code>\n\n🔗 لینک اشتراک:\n{html.escape(str(connection))}")
+
+    service_label = TEXT[lang(uid)].get(
+        str(row["service"]),
+        str(row["service"]).title(),
+    )
+
+    # Expiry warning
+    if days_left <= 1:
+        expiry_warning = ui(
+            uid,
+            "🔴 <b>هشدار انقضا:</b>\nاین سرویس کمتر از ۱ روز اعتبار دارد. برای جلوگیری از قطع سرویس، آن را تمدید کنید.",
+            "🔴 <b>Expiry warning:</b>\nThis service has less than 1 day remaining. Renew it to avoid interruption.",
+        )
+    elif days_left <= 3:
+        expiry_warning = ui(
+            uid,
+            "🟠 <b>هشدار انقضا:</b>\nاین سرویس به‌زودی منقضی می‌شود. بهتر است قبل از پایان اعتبار آن را تمدید کنید.",
+            "🟠 <b>Expiry warning:</b>\nThis service will expire soon. Consider renewing it before the expiration date.",
+        )
+    elif days_left <= 7:
+        expiry_warning = ui(
+            uid,
+            "🟡 <b>یادآوری:</b>\nکمتر از ۷ روز تا پایان اعتبار سرویس باقی مانده است.",
+            "🟡 <b>Reminder:</b>\nLess than 7 days remain before this service expires.",
+        )
     else:
-        text = (f"🟣 <b>Your Active Service</b>\n\n🧾 Order: #{oid}\n🔌 Service: {service_label}\n📦 Volume: {gb}\n⏳ Days remaining: <b>{days_left} days</b>\n👤 Username: <code>{html.escape(str(row['panel_username']))}</code>\n\n🔗 Subscription:\n{html.escape(str(connection))}")
-    await q.message.reply_text(text, parse_mode="HTML", reply_markup=menu(uid))
+        expiry_warning = ""
+
+    if lang(uid) == "fa":
+        text = (
+            f"🟣 <b>سرویس فعال شما</b>\n\n"
+            f"🧾 سفارش: #{oid}\n"
+            f"🔌 سرویس: {service_label}\n"
+            f"📦 حجم: {gb}\n"
+            f"⏳ روز باقی‌مانده: <b>{days_left} روز</b>\n"
+            f"👤 نام کاربری: <code>{html.escape(str(row['panel_username']))}</code>\n"
+        )
+
+        if expiry_warning:
+            text += f"\n{expiry_warning}\n"
+
+        text += (
+            f"\n🔗 لینک اشتراک:\n"
+            f"{html.escape(str(connection))}"
+        )
+
+    else:
+        text = (
+            f"🟣 <b>Your Active Service</b>\n\n"
+            f"🧾 Order: #{oid}\n"
+            f"🔌 Service: {service_label}\n"
+            f"📦 Volume: {gb}\n"
+            f"⏳ Days remaining: <b>{days_left} days</b>\n"
+            f"👤 Username: <code>{html.escape(str(row['panel_username']))}</code>\n"
+        )
+
+        if expiry_warning:
+            text += f"\n{expiry_warning}\n"
+
+        text += (
+            f"\n🔗 Subscription:\n"
+            f"{html.escape(str(connection))}"
+        )
+
+    await q.message.reply_text(
+        text,
+        parse_mode="HTML",
+        reply_markup=menu(uid),
+    )
 
 
 async def renew_service(update, context):
@@ -1630,6 +2317,22 @@ async def renew_execute(update, context):
         db.refund_renewal(uid, price, oid)
         await q.message.reply_text(tr(uid, "renew_error"), reply_markup=menu(uid))
         return
+    try:
+        db.record_renewal_success(uid, oid, price)
+    except Exception as renewal_error:
+        print(
+            f"⚠️ Failed to record successful renewal #{oid}: "
+            f"{type(renewal_error).__name__}: {renewal_error}"
+        )
+
+    try:
+        await check_and_reward_missions(uid, context)
+    except Exception as mission_error:
+        print(
+            f"⚠️ Mission reward check failed after renewal: "
+            f"{type(mission_error).__name__}: {mission_error}"
+        )
+
     config = result.get("connection_details") or result.get("subscription_url") or result.get("config") or row["config"] or ""
     if config:
         db.complete_order(oid, row["panel_username"], str(config))
@@ -2368,6 +3071,16 @@ async def review_deposit_callback(update, context):
     await q.edit_message_reply_markup(reply_markup=None)
 
     uid = deposit["user_id"]
+
+    if ok == "1":
+        try:
+            await check_and_reward_missions(uid, context)
+        except Exception as mission_error:
+            print(
+                f"⚠️ Mission reward check failed after deposit: "
+                f"{type(mission_error).__name__}: {mission_error}"
+            )
+
     if ok == "1":
         await context.bot.send_message(
             uid,
@@ -2521,6 +3234,396 @@ async def copytest(update, context):
     )
 
 
+
+
+async def automatic_expiry_warning_job(context):
+    """
+    بررسی خودکار انقضا و حجم سرویس‌ها.
+    وضعیت هشدارها داخل SQLite ذخیره می‌شود
+    تا بعد از Restart دوباره ارسال نشوند.
+    """
+
+    import sqlite3
+    import time
+
+    db_file = os.getenv("DATABASE_FILE", "alphashop.db")
+
+    try:
+        conn = sqlite3.connect(db_file)
+        conn.row_factory = sqlite3.Row
+
+        conn.execute(
+            """
+            CREATE TABLE IF NOT EXISTS service_warning_log (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                order_id INTEGER NOT NULL,
+                warning_type TEXT NOT NULL,
+                sent_at INTEGER NOT NULL,
+                UNIQUE(order_id, warning_type)
+            )
+            """
+        )
+
+        conn.commit()
+
+        rows = conn.execute(
+            """
+            SELECT id, user_id, panel_username, service
+            FROM orders
+            WHERE status = 'completed'
+              AND panel_username IS NOT NULL
+              AND panel_username != ''
+            ORDER BY id DESC
+            """
+        ).fetchall()
+
+    except Exception as exc:
+        print(f"❌ AUTO WARNING DB ERROR: {exc!r}")
+        return
+
+    now = int(time.time())
+
+    async def already_sent(order_id, warning_type):
+        try:
+            row = conn.execute(
+                """
+                SELECT 1
+                FROM service_warning_log
+                WHERE order_id = ?
+                  AND warning_type = ?
+                LIMIT 1
+                """,
+                (order_id, warning_type),
+            ).fetchone()
+
+            return row is not None
+
+        except Exception as exc:
+            print(f"⚠️ WARNING LOG READ ERROR: {exc!r}")
+            return True
+
+    async def mark_sent(order_id, warning_type):
+        try:
+            conn.execute(
+                """
+                INSERT OR IGNORE INTO service_warning_log
+                    (order_id, warning_type, sent_at)
+                VALUES (?, ?, ?)
+                """,
+                (order_id, warning_type, int(time.time())),
+            )
+            conn.commit()
+
+        except Exception as exc:
+            print(f"⚠️ WARNING LOG WRITE ERROR: {exc!r}")
+
+    try:
+        for row in rows:
+            try:
+                oid = int(row["id"])
+                uid = int(row["user_id"])
+                username = str(row["panel_username"]).strip()
+                service = str(row["service"] or "gold")
+
+                info = await get_customer_info(
+                    username,
+                    service,
+                )
+
+                if not info.get("ok"):
+                    continue
+
+                # =================================================
+                # EXPIRY
+                # =================================================
+
+                expire = info.get("expire")
+
+                if isinstance(expire, str):
+                    try:
+                        expire = int(float(expire))
+                    except ValueError:
+                        try:
+                            from datetime import datetime
+
+                            expire = int(
+                                datetime.fromisoformat(
+                                    expire.replace("Z", "+00:00")
+                                ).timestamp()
+                            )
+
+                        except Exception:
+                            expire = None
+
+                if expire:
+                    expire = int(expire)
+
+                    if expire > now:
+                        remaining = expire - now
+                        days_left = max(
+                            1,
+                            (remaining + 86399) // 86400
+                        )
+
+                        if days_left <= 1:
+                            warning_type = "expire_1d"
+
+                        elif days_left <= 3:
+                            warning_type = "expire_3d"
+
+                        elif days_left <= 7:
+                            warning_type = "expire_7d"
+
+                        else:
+                            warning_type = None
+
+                        if warning_type and not await already_sent(
+                            oid,
+                            warning_type,
+                        ):
+
+                            if lang(uid) == "fa":
+
+                                if warning_type == "expire_1d":
+                                    message = (
+                                        "🔴 <b>هشدار مهم انقضا</b>\n\n"
+                                        f"🧾 سفارش: #{oid}\n"
+                                        f"🔌 سرویس: {service.upper()}\n"
+                                        "⏳ کمتر از ۱ روز تا پایان اعتبار "
+                                        "سرویس شما باقی مانده است.\n\n"
+                                        "برای جلوگیری از قطع سرویس، "
+                                        "سرویس خود را تمدید کنید."
+                                    )
+
+                                elif warning_type == "expire_3d":
+                                    message = (
+                                        "🟠 <b>هشدار انقضای سرویس</b>\n\n"
+                                        f"🧾 سفارش: #{oid}\n"
+                                        f"🔌 سرویس: {service.upper()}\n"
+                                        f"⏳ حدود {days_left} روز تا پایان "
+                                        "اعتبار باقی مانده است.\n\n"
+                                        "می‌توانید سرویس خود را تمدید کنید."
+                                    )
+
+                                else:
+                                    message = (
+                                        "🟡 <b>یادآوری انقضای سرویس</b>\n\n"
+                                        f"🧾 سفارش: #{oid}\n"
+                                        f"🔌 سرویس: {service.upper()}\n"
+                                        f"⏳ {days_left} روز تا پایان "
+                                        "اعتبار باقی مانده است."
+                                    )
+
+                            else:
+
+                                if warning_type == "expire_1d":
+                                    message = (
+                                        "🔴 <b>Important Expiry Warning</b>\n\n"
+                                        f"🧾 Order: #{oid}\n"
+                                        f"🔌 Service: {service.upper()}\n"
+                                        "⏳ Less than 1 day remains "
+                                        "before expiration.\n\n"
+                                        "Please renew your service."
+                                    )
+
+                                elif warning_type == "expire_3d":
+                                    message = (
+                                        "🟠 <b>Service Expiry Warning</b>\n\n"
+                                        f"🧾 Order: #{oid}\n"
+                                        f"🔌 Service: {service.upper()}\n"
+                                        f"⏳ About {days_left} days remain "
+                                        "before expiration."
+                                    )
+
+                                else:
+                                    message = (
+                                        "🟡 <b>Service Expiry Reminder</b>\n\n"
+                                        f"🧾 Order: #{oid}\n"
+                                        f"🔌 Service: {service.upper()}\n"
+                                        f"⏳ {days_left} days remain "
+                                        "before expiration."
+                                    )
+
+                            try:
+                                await context.bot.send_message(
+                                    chat_id=uid,
+                                    text=message,
+                                    parse_mode="HTML",
+                                    reply_markup=menu(uid),
+                                )
+
+                                await mark_sent(
+                                    oid,
+                                    warning_type,
+                                )
+
+                                print(
+                                    f"✅ EXPIRY WARNING SENT "
+                                    f"user={uid} order={oid} "
+                                    f"type={warning_type}"
+                                )
+
+                            except Exception as exc:
+                                print(
+                                    f"⚠️ EXPIRY MESSAGE FAILED "
+                                    f"user={uid} order={oid}: {exc!r}"
+                                )
+
+                # =================================================
+                # VOLUME
+                # =================================================
+
+                data_limit = info.get("data_limit")
+                used_traffic = info.get("used_traffic")
+
+                try:
+                    data_limit = int(float(data_limit or 0))
+                except (ValueError, TypeError):
+                    data_limit = 0
+
+                try:
+                    used_traffic = int(float(used_traffic or 0))
+                except (ValueError, TypeError):
+                    used_traffic = 0
+
+                # 0 = unlimited
+                if data_limit <= 0:
+                    continue
+
+                used_traffic = max(0, used_traffic)
+
+                usage_percent = (
+                    used_traffic / data_limit
+                ) * 100
+
+                if usage_percent >= 90:
+                    volume_warning = "volume_90"
+
+                elif usage_percent >= 80:
+                    volume_warning = "volume_80"
+
+                elif usage_percent >= 70:
+                    volume_warning = "volume_70"
+
+                else:
+                    volume_warning = None
+
+                if not volume_warning:
+                    continue
+
+                if await already_sent(
+                    oid,
+                    volume_warning,
+                ):
+                    continue
+
+                usage_display = min(
+                    100,
+                    usage_percent,
+                )
+
+                if lang(uid) == "fa":
+
+                    if volume_warning == "volume_90":
+                        message = (
+                            "🔴 <b>هشدار مصرف حجم</b>\n\n"
+                            f"🧾 سفارش: #{oid}\n"
+                            f"🔌 سرویس: {service.upper()}\n"
+                            f"📊 میزان مصرف: "
+                            f"<b>{usage_display:.0f}%</b>\n\n"
+                            "بیش از ۹۰٪ حجم سرویس شما مصرف شده است.\n"
+                            "برای جلوگیری از قطع سرویس، "
+                            "تمدید را در نظر بگیرید."
+                        )
+
+                    elif volume_warning == "volume_80":
+                        message = (
+                            "🟠 <b>هشدار مصرف حجم</b>\n\n"
+                            f"🧾 سفارش: #{oid}\n"
+                            f"🔌 سرویس: {service.upper()}\n"
+                            f"📊 میزان مصرف: "
+                            f"<b>{usage_display:.0f}%</b>\n\n"
+                            "بخش زیادی از حجم سرویس شما مصرف شده است."
+                        )
+
+                    else:
+                        message = (
+                            "🟡 <b>یادآوری مصرف حجم</b>\n\n"
+                            f"🧾 سفارش: #{oid}\n"
+                            f"🔌 سرویس: {service.upper()}\n"
+                            f"📊 میزان مصرف: "
+                            f"<b>{usage_display:.0f}%</b>\n\n"
+                            "حدود ۷۰٪ از حجم سرویس شما مصرف شده است."
+                        )
+
+                else:
+
+                    if volume_warning == "volume_90":
+                        message = (
+                            "🔴 <b>Traffic Usage Warning</b>\n\n"
+                            f"🧾 Order: #{oid}\n"
+                            f"🔌 Service: {service.upper()}\n"
+                            f"📊 Usage: "
+                            f"<b>{usage_display:.0f}%</b>\n\n"
+                            "More than 90% of your traffic has been used."
+                        )
+
+                    elif volume_warning == "volume_80":
+                        message = (
+                            "🟠 <b>Traffic Usage Warning</b>\n\n"
+                            f"🧾 Order: #{oid}\n"
+                            f"🔌 Service: {service.upper()}\n"
+                            f"📊 Usage: "
+                            f"<b>{usage_display:.0f}%</b>\n\n"
+                            "A large portion of your traffic has been used."
+                        )
+
+                    else:
+                        message = (
+                            "🟡 <b>Traffic Usage Reminder</b>\n\n"
+                            f"🧾 Order: #{oid}\n"
+                            f"🔌 Service: {service.upper()}\n"
+                            f"📊 Usage: "
+                            f"<b>{usage_display:.0f}%</b>\n\n"
+                            "About 70% of your traffic has been used."
+                        )
+
+                try:
+                    await context.bot.send_message(
+                        chat_id=uid,
+                        text=message,
+                        parse_mode="HTML",
+                        reply_markup=menu(uid),
+                    )
+
+                    await mark_sent(
+                        oid,
+                        volume_warning,
+                    )
+
+                    print(
+                        f"✅ VOLUME WARNING SENT "
+                        f"user={uid} order={oid} "
+                        f"type={volume_warning} "
+                        f"usage={usage_display:.1f}%"
+                    )
+
+                except Exception as exc:
+                    print(
+                        f"⚠️ VOLUME MESSAGE FAILED "
+                        f"user={uid} order={oid}: {exc!r}"
+                    )
+
+            except Exception as exc:
+                print(
+                    f"⚠️ AUTO SERVICE CHECK FAILED "
+                    f"order={row['id']}: {exc!r}"
+                )
+
+    finally:
+        conn.close()
+
+
 def run_bot():
     import asyncio
 
@@ -2539,6 +3642,8 @@ def run_bot():
     print("✅ Event loop ready")
 
     db.init_db()
+    db.init_mission_db()
+    print("✅ Mission database initialized")
 
     print("✅ Database initialized")
 
@@ -2650,6 +3755,42 @@ def run_bot():
             pattern=r"^alpha_coin$",
         )
     )
+    app.add_handler(
+        CallbackQueryHandler(
+            alpha_coin_history_callback,
+            pattern=r"^alpha_coin_history$",
+        )
+    )
+    app.add_handler(
+        CallbackQueryHandler(
+            missions_callback,
+            pattern=r"^missions$",
+        )
+    )
+    app.add_handler(
+        CallbackQueryHandler(
+            mission_stage_callback,
+            pattern=r"^mission_stage:\d+$",
+        )
+    )
+    app.add_handler(
+        CallbackQueryHandler(
+            mission_claim_callback,
+            pattern=r"^mission_claim:\d+$",
+        )
+    )
+    app.add_handler(
+        CallbackQueryHandler(
+            alpha_coin_history_callback,
+            pattern=r"^alpha_coin_history$",
+        )
+    )
+    app.add_handler(
+        CallbackQueryHandler(
+            missions_callback,
+            pattern=r"^missions$",
+        )
+    )
 
     app.add_handler(MessageHandler(filters.Regex(r"^(🛒 خرید سرویس|🔄 تمدید سرویس|🎁 تست رایگان|💰 کیف پول|👥 زیرمجموعه‌گیری|🟣 سفارش‌های فعال|📞 پشتیبانی|⚙️ تنظیمات|📚 راهنما|🛒 Buy Service|🔄 Renew Service|🎁 Free Trial|💰 Wallet|👥 Referrals|🟣 Active Services|📞 Support|⚙️ Settings|📚 Guide)$"), end_ai_mode), group=-1)
     app.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, ai_support_message), group=1)
@@ -2730,6 +3871,13 @@ def run_bot():
         MessageHandler(
             filters.Regex(r"^(💰 کیف پول|💰 Wallet)$"),
             wallet,
+        )
+    )
+
+    app.add_handler(
+        MessageHandler(
+            filters.Regex(r"^(👤 پروفایل|👤 Profile)$"),
+            account,
         )
     )
 
