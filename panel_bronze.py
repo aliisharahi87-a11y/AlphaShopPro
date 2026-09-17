@@ -171,6 +171,31 @@ def _walk_connection_values(obj, panel_url=""):
     return result
 
 
+def _fix_bronze_https(value):
+    """Normalize Bronze subscription links to a valid https:// URL."""
+    if not value:
+        return ""
+
+    value = str(value).strip()
+
+    if value.startswith("https://"):
+        return value
+
+    if value.startswith("http://"):
+        return "https://" + value[7:]
+
+    if value.startswith("https:/") and not value.startswith("https://"):
+        return "https://" + value[7:].lstrip("/")
+
+    if value.startswith("http:/") and not value.startswith("http://"):
+        return "https://" + value[6:].lstrip("/")
+
+    if value.startswith("//"):
+        return "https:" + value
+
+    return "https://" + value.lstrip("/")
+
+
 def _extract_connection(data, panel_url=""):
     values = _walk_connection_values(data, panel_url)
     return values[0] if values else ""
@@ -537,7 +562,7 @@ async def _pasargard_create_customer(
                     }
 
             # 1) Try the creation response.
-            connection = _extract_connection(data, panel_url)
+            connection = _fix_bronze_https(_extract_connection(data, panel_url))
 
             # 2) Fetch the newly-created user. This fixes panels that return
             # only {id, username, ...} from POST /api/user.
@@ -546,7 +571,7 @@ async def _pasargard_create_customer(
                 user_data = await _get_created_user(
                     session, panel_url, headers, str(username).strip()
                 )
-                connection = _extract_connection(user_data, panel_url)
+                connection = _fix_bronze_https(_extract_connection(user_data, panel_url))
 
             # 3) Pasargard fallback: explicitly request subscription links.
             links = []
@@ -618,7 +643,7 @@ async def _pasarguard_user_info(username, service="bronze"):
             if not user_data:
                 return {"ok": False, "error": "User not found on panel"}
             links = await _get_subscription_links(session, panel_url, headers, user_data, username)
-            connection = _extract_connection(user_data, panel_url) or (links[0] if links else "")
+            connection = _fix_bronze_https(_extract_connection(user_data, panel_url)) or (links[0] if links else "")
             return {"ok": True, "user": user_data, "subscription_url": connection, "expire": user_data.get("expire"), "data_limit": user_data.get("data_limit"), "status": user_data.get("status")}
         except Exception as exc:
             print(f"❌ {service.upper()} USER INFO EXCEPTION: {exc!r}")
@@ -666,7 +691,7 @@ async def _extend_pasarguard_customer(username, days=30, service="bronze"):
                     last = data
                     if r.status in (200, 201):
                         links = await _get_subscription_links(session, panel_url, headers, data if isinstance(data, dict) else current, username)
-                        connection = _extract_connection(data, panel_url) or _extract_connection(current, panel_url) or (links[0] if links else "")
+                        connection = _fix_bronze_https(_extract_connection(data, panel_url)) or _extract_connection(current, panel_url) or (links[0] if links else "")
                         return {"ok": True, "data": data, "subscription_url": connection, "connection_details": connection, "config": connection, "expire": new_expire}
             raise RuntimeError(f"PasarGuard modify user failed: {last}")
         except Exception as exc:
