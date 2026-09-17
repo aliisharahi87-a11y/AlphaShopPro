@@ -40,7 +40,7 @@ TEXT = {
         "trial": "🎁 تست رایگان",
         "renew_choose": "🔄 سرویس موردنظر برای تمدید را انتخاب کنید:",
         "renew_none": "❌ سرویس فعالی برای تمدید پیدا نشد.",
-        "renew_confirm": "🔄 <b>تمدید سرویس</b>\n\n🧾 سفارش: #{oid}\n🔌 سرویس: {service}\n📦 حجم: {gb}\n💰 هزینه تمدید: {price:,} تومان\n📅 مدت تمدید: {days} روز\n\nبرای ادامه روی تأیید بزنید.",
+        "renew_confirm": "🔄 <b>تمدید سرویس</b>\n\n🧾 سفارش: #{oid}\n🔌 سرویس: {service}\n📦 سرویس: {gb}\n💰 هزینه تمدید: {price:,} تومان\n📅 مدت تمدید: {days} روز\n\nبرای ادامه روی تأیید بزنید.",
         "renew_ok": "✅ سرویس شما با موفقیت {days} روز تمدید شد.",
         "renew_error": "❌ تمدید سرویس انجام نشد و مبلغی از کیف پول شما کسر نشد.",
         "wallet": "💰 کیف پول",
@@ -70,7 +70,7 @@ TEXT = {
         "custom_prompt": "✏️ حجم موردنظر را به GB وارد کنید.\n\n💰 قیمت هر گیگ: {price:,} تومان",
         "invalid_gb": "❌ حجم باید یک عدد صحیح بزرگ‌تر از صفر باشد.",
         "not_enough": "❌ موجودی کیف پول کافی نیست.\n\nموجودی: {balance:,} تومان\nقیمت: {price:,} تومان\n\nابتدا کیف پول خود را شارژ کنید.",
-        "order_success": "🎉 سفارش شما با موفقیت ثبت شد!\n\n🧾 شماره سفارش: #{oid}\n📦 حجم: {gb}\n💰 مبلغ: {price:,} تومان\n👤 نام کاربری: {username}\n\n🔗 اطلاعات اتصال:\n<code>{config}</code>",
+        "order_success": "🎉 <b>سفارش با موفقیت ثبت شد!</b>\n\n🧾 شماره سفارش: #{oid}\n📦 سرویس: {gb}\n💰 مبلغ: {price:,} تومان\n👤 نام کاربری: {username}\n\n🔗 اطلاعات اتصال:\n<code>{config}</code>",
         "panel_error": "⚠️ سفارش ثبت شد اما اتصال به پنل با موفقیت انجام نشد؛ مبلغ سفارش به کیف پول شما برگشت داده شد.\n\nلطفاً با پشتیبانی تماس بگیرید.",
         "ref": "👥 تعداد زیرمجموعه‌های شما: {count}\n🎁 درصد پاداش فعلی: {percent}%\n\n🔗 لینک دعوت شما:\n{link}",
         "no_orders": "📦 هنوز سفارشی ثبت نکرده‌اید.",
@@ -117,11 +117,11 @@ TEXT = {
         "trial": "🎁 تست رایگان",
         "renew_choose": "🔄 سرویس موردنظر برای تمدید را انتخاب کنید:",
         "renew_none": "❌ سرویس فعالی برای تمدید پیدا نشد.",
-        "renew_confirm": "🔄 <b>تمدید سرویس</b>\n\n🧾 سفارش: #{oid}\n🔌 سرویس: {service}\n📦 حجم: {gb}\n💰 هزینه تمدید: {price:,} تومان\n📅 مدت تمدید: {days} روز\n\nبرای ادامه روی تأیید بزنید.",
+        "renew_confirm": "🔄 <b>تمدید سرویس</b>\n\n🧾 سفارش: #{oid}\n🔌 سرویس: {service}\n📦 سرویس: {gb}\n💰 هزینه تمدید: {price:,} تومان\n📅 مدت تمدید: {days} روز\n\nبرای ادامه روی تأیید بزنید.",
         "renew_ok": "✅ سرویس شما با موفقیت {days} روز تمدید شد.",
         "renew_error": "❌ تمدید سرویس انجام نشد و مبلغی از کیف پول شما کسر نشد.",
         "trial_used": "❌ شما قبلاً از تست رایگان استفاده کرده‌اید.",
-        "trial_success": "🎉 تست رایگان {service} شما فعال شد.\n\n📦 حجم: ۱۵۰ مگابایت\n📅 اعتبار: ۱ روز\n\n🔗 لینک اشتراک:\n<code>{config}</code>",
+        "trial_success": "🎉 تست رایگان {service} شما فعال شد.\n\n📦 سرویس: ۱۵۰ مگابایت\n📅 اعتبار: ۱ روز\n\n🔗 لینک اشتراک:\n<code>{config}</code>",
         "trial_error": "❌ ساخت تست رایگان با خطا مواجه شد.",
     },
     "en": {
@@ -599,17 +599,23 @@ async def wallet(update, context):
 
     if lang(uid) == "fa":
         text = (
-            "💰 <b>کیف پول شما</b>\n\n"
-            f"💵 موجودی تومان: <b>{u['balance']:,} تومان</b>\n"
-            f"🪙 Alpha Coin: <b>{coins:,} ALC</b>\n"
-            f"💎 ارزش Coin: <b>{coins * 100:,} تومان</b>"
+            "👥 <b>زیرمجموعه‌گیری آلفا شاپ</b>\n\n"
+            f"👤 تعداد زیرمجموعه‌ها: <b>{count} نفر</b>\n"
+            f"🪙 موجودی سکه آلفا: <b>{coins:,} سکه</b>\n\n"
+            "🎁 <b>پاداش دعوت</b>\n"
+            "هر کاربر جدیدی که با لینک دعوت شما وارد شود،\n"
+            "یک کد تخفیف <b>۵٪</b> یک‌بارمصرف دریافت می‌کنید.\n\n"
+            "🪙 <b>پاداش خرید</b>\n"
+            "از هر خرید موفق زیرمجموعه‌های شما،\n"
+            "<b>۲٫۵٪</b> مبلغ پرداختی را به صورت سکه آلفا دریافت می‌کنید.\n\n"
+            f"🔗 <b>لینک دعوت شما:</b>\n"
+            f"<code>{link}</code>"
         )
     else:
         text = (
             "💰 <b>Your Wallet</b>\n\n"
             f"💵 Toman Balance: <b>{u['balance']:,}</b>\n"
             f"🪙 Alpha Coin: <b>{coins:,} ALC</b>\n"
-            f"💎 Coin Value: <b>{coins * 100:,} Toman</b>"
         )
 
     await update.message.reply_text(
@@ -866,30 +872,35 @@ async def buy(update, context):
 
     if usable_coins > 0:
         coin_fa = (
-            f"\n🪙 Alpha Coin قابل استفاده: <b>{usable_coins} ALC</b>"
+            f"\n🪙 سکه آلفا: <b>{usable_coins} سکه</b>"
             f" (<b>{usable_coin_value:,} تومان</b>)"
-            f"\n💳 مبلغ پرداختی پس از Coin: <b>{payable_after_coin:,} تومان</b>"
-        )
-        coin_en = (
-            f"\n🪙 Usable Alpha Coin: <b>{usable_coins} ALC</b>"
-            f" (<b>{usable_coin_value:,} Toman</b>)"
-            f"\n💳 Payable after Coin: <b>{payable_after_coin:,} Toman</b>"
+            f"\n💵 مبلغ قابل پرداخت: <b>{payable_after_coin:,} تومان</b>"
         )
     else:
-        coin_fa = "\n🪙 Alpha Coin قابل استفاده: <b>۰ ALC</b>"
-        coin_en = "\n🪙 Usable Alpha Coin: <b>0 ALC</b>"
+        coin_fa = (
+            f"\n💵 مبلغ قابل پرداخت: <b>{final_price:,} تومان</b>"
+        )
 
     if lang(uid) == "fa":
+        if coupon:
+            price_section = (
+                f"💰 مبلغ اصلی: <b>{original_price:,} تومان</b>"
+                f"{discount_text}\n"
+                f"💳 مبلغ پس از تخفیف: <b>{final_price:,} تومان</b>"
+            )
+        else:
+            price_section = (
+                f"💳 مبلغ: <b>{final_price:,} تومان</b>"
+            )
+
         text = (
-            "🛒 <b>تأیید خرید سرویس</b>\n\n"
+            "🛒 <b>تأیید خرید</b>\n\n"
             f"📦 سرویس: <b>{title}</b>\n"
             "⏳ مدت: <b>۱ ماه</b>\n"
-            "👤 کاربران: <b>نامحدود</b>\n"
-            f"💰 قیمت اصلی: <b>{original_price:,} تومان</b>"
-            f"{discount_text}\n"
-            f"\n💳 <b>قیمت نهایی: {final_price:,} تومان</b>"
+            "👤 کاربران: <b>نامحدود</b>\n\n"
+            f"{price_section}"
             f"{coin_fa}\n\n"
-            "اگر اطلاعات بالا درست است، روی «✅ تأیید پرداخت» بزنید."
+            "اگر اطلاعات درست است، روی «✅ تأیید پرداخت» بزنید."
         )
         confirm_text = "✅ تأیید پرداخت"
         cancel_text = "❌ لغو خرید"
@@ -989,7 +1000,7 @@ async def custom_gb(update, context):
     if lang(uid) == "fa":
         text = (
             "🛒 <b>تأیید خرید حجم دلخواه</b>\n\n"
-            f"📦 حجم: <b>{gb} GB</b>\n"
+            f"📦 سرویس: <b>{gb} GB</b>\n"
             "⏳ مدت: <b>۱ ماه</b>\n"
             "👤 کاربران: <b>نامحدود</b>\n"
             f"💰 قیمت اصلی: <b>{original_price:,} تومان</b>"
@@ -1326,9 +1337,9 @@ async def _complete_pending_purchase(update, context):
         "🟢 <b>سفارش جدید با موفقیت ساخته شد</b>\n\n"
         f"🧾 سفارش: <code>#{oid}</code>\n"
         f"🔌 سرویس: <b>{service_label}</b>\n"
-        f"📦 حجم: <b>{'Unlimited' if unlimited else str(gb) + ' GB'}</b>\n"
+        f"📦 سرویس: <b>{'Unlimited' if unlimited else str(gb) + ' GB'}</b>\n"
         f"💰 قیمت پس از تخفیف: <b>{price_before_coin:,} تومان</b>\n"
-        f"🪙 Alpha Coin مصرف‌شده: <b>{coin_amount} ALC</b>"
+        f"🪙 سکه آلفا مصرف‌شده: <b>{coin_amount} ALC</b>"
         f" ({coin_value:,} تومان)\n"
         f"💳 مبلغ پرداختی نهایی: <b>{price:,} تومان</b>\n"
         f"👤 کاربر: <b>{query.from_user.full_name}</b>\n"
@@ -1361,13 +1372,13 @@ async def _complete_pending_purchase(update, context):
     buyer_coin = int(coin_rewards.get("buyer", 0))
 
     title = (
-        f"🎉 سفارش شما با موفقیت ثبت شد!\n\n"
+        f"🎉 <b>سفارش با موفقیت ثبت شد!</b>\n\n"
         f"🧾 شماره سفارش: #{oid}\n"
-        f"📦 حجم: {'Unlimited' if unlimited else str(gb) + ' GB'}\n"
-        f"💰 مبلغ پرداختی: {price:,} تومان\n"
-        f"🪙 Alpha Coin مصرف‌شده: {coin_amount} ALC"
+        f"📦 سرویس: {'Unlimited' if unlimited else str(gb) + ' GB'}\n"
+        f"💵 مبلغ پرداختی: {price:,} تومان\n"
+        f"🪙 سکه آلفا مصرف‌شده: {coin_amount} ALC"
         f" ({coin_value:,} تومان)\n"
-        f"🪙 پاداش Alpha Coin: {buyer_coin} ALC\n"
+        f"🎁 پاداش سکه آلفا: {buyer_coin} ALC\n"
         f"👤 نام کاربری: {final_username}"
     ) if lang(uid) == "fa" else (
         f"🎉 Your order was completed successfully!\n\n"
@@ -1456,13 +1467,16 @@ async def referrals(update, context):
     if lang(uid) == "fa":
         text = (
             "👥 <b>زیرمجموعه‌گیری آلفا شاپ</b>\n\n"
-            f"👤 تعداد زیرمجموعه‌ها: <b>{count}</b>\n"
-            f"🪙 موجودی Alpha Coin: <b>{coins:,} ALC</b>\n\n"
-            "🎁 کاربر جدیدی که با لینک شما وارد شود، "
-            "<b>۵٪ تخفیف یک‌بارمصرف</b> دریافت می‌کند.\n"
-            "🪙 شما از هر خرید موفق او، "
-            "<b>۲.۵٪ مبلغ پرداختی</b> را به صورت Alpha Coin دریافت می‌کنید.\n\n"
-            f"🔗 لینک دعوت شما:\n{link}"
+            f"👤 تعداد زیرمجموعه‌ها: <b>{count} نفر</b>\n"
+            f"🪙 موجودی سکه آلفا: <b>{coins:,} سکه</b>\n\n"
+            "🎁 <b>پاداش دعوت</b>\n"
+            "هر کاربر جدیدی که با لینک دعوت شما وارد شود،\n"
+            "یک کد تخفیف <b>۵٪</b> یک‌بارمصرف دریافت می‌کنید.\n\n"
+            "🪙 <b>پاداش خرید</b>\n"
+            "از هر خرید موفق زیرمجموعه‌های شما،\n"
+            "<b>۲٫۵٪</b> مبلغ پرداختی را به صورت سکه آلفا دریافت می‌کنید.\n\n"
+            f"🔗 <b>لینک دعوت شما:</b>\n"
+            f"<code>{link}</code>"
         )
     else:
         text = (
@@ -1479,8 +1493,8 @@ async def referrals(update, context):
     await update.message.reply_text(
         text,
         parse_mode="HTML",
+        reply_markup=menu(uid),
     )
-
 
 async def orders(update, context):
     if not await gate(update, context):
@@ -1553,7 +1567,7 @@ async def active_order_detail(update, context):
     connection = info.get("subscription_url") or row["config"] or ""
     service_label = TEXT[lang(uid)].get(str(row["service"]), str(row["service"]).title())
     if lang(uid) == "fa":
-        text = (f"🟣 <b>سرویس فعال شما</b>\n\n🧾 سفارش: #{oid}\n🔌 سرویس: {service_label}\n📦 حجم: {gb}\n⏳ روز باقی‌مانده: <b>{days_left} روز</b>\n👤 نام کاربری: <code>{html.escape(str(row['panel_username']))}</code>\n\n🔗 لینک اشتراک:\n{html.escape(str(connection))}")
+        text = (f"🟣 <b>سرویس فعال شما</b>\n\n🧾 سفارش: #{oid}\n🔌 سرویس: {service_label}\n📦 سرویس: {gb}\n⏳ روز باقی‌مانده: <b>{days_left} روز</b>\n👤 نام کاربری: <code>{html.escape(str(row['panel_username']))}</code>\n\n🔗 لینک اشتراک:\n{html.escape(str(connection))}")
     else:
         text = (f"🟣 <b>Your Active Service</b>\n\n🧾 Order: #{oid}\n🔌 Service: {service_label}\n📦 Volume: {gb}\n⏳ Days remaining: <b>{days_left} days</b>\n👤 Username: <code>{html.escape(str(row['panel_username']))}</code>\n\n🔗 Subscription:\n{html.escape(str(connection))}")
     await q.message.reply_text(text, parse_mode="HTML", reply_markup=menu(uid))
@@ -2495,7 +2509,7 @@ async def trial_service(update, context):
         f"🎉 تست رایگان {TEXT[lang(uid)][service]} شما فعال شد." if lang(uid) == "fa"
         else f"🎉 Your {TEXT[lang(uid)][service]} free trial has been activated."
     )
-    extra = ["📦 حجم: ۱۵۰ مگابایت", "📅 اعتبار: ۱ روز"] if lang(uid) == "fa" else ["📦 Volume: 150 MB", "📅 Validity: 1 day"]
+    extra = ["📦 سرویس: ۱۵۰ مگابایت", "📅 اعتبار: ۱ روز"] if lang(uid) == "fa" else ["📦 Volume: 150 MB", "📅 Validity: 1 day"]
     await send_connection_card(q.message, uid, title, config, extra_lines=extra, reply_markup=menu(uid))
 
 
