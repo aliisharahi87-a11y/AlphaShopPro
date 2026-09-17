@@ -528,7 +528,13 @@ async def _pasargard_create_customer(
                             )
 
                             if links:
-                                connection = links[0]
+                                for link in links:
+                                    fixed = _fix_bronze_https(link)
+                                    if fixed:
+                                        connection = fixed
+                                        break
+
+                        connection = _fix_bronze_https(connection)
 
                         if connection:
                             merged = (
