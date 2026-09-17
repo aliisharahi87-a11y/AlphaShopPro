@@ -28,7 +28,8 @@ def init_db():
             trial_used INTEGER DEFAULT 0,
             trial_gold_used INTEGER DEFAULT 0,
             trial_silver_used INTEGER DEFAULT 0,
-            trial_bronze_used INTEGER DEFAULT 0
+            trial_bronze_used INTEGER DEFAULT 0,
+            alpha_coins INTEGER DEFAULT 0
         );
 
         CREATE TABLE IF NOT EXISTS plans(
@@ -94,9 +95,24 @@ def init_db():
             key TEXT PRIMARY KEY,
             value TEXT
         );
+
+        CREATE TABLE IF NOT EXISTS alpha_coin_ledger(
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            user_id INTEGER NOT NULL,
+            order_id INTEGER,
+            kind TEXT NOT NULL,
+            amount INTEGER NOT NULL,
+            description TEXT,
+            created_at INTEGER
+        );
+
+        CREATE UNIQUE INDEX IF NOT EXISTS idx_alpha_coin_order_reward
+        ON alpha_coin_ledger(user_id, order_id, kind)
+        WHERE order_id IS NOT NULL;
         """)
 
         for stmt in (
+            "ALTER TABLE users ADD COLUMN alpha_coins INTEGER DEFAULT 0",
             "ALTER TABLE users ADD COLUMN trial_gold_used INTEGER DEFAULT 0",
             "ALTER TABLE users ADD COLUMN trial_silver_used INTEGER DEFAULT 0",
             "ALTER TABLE users ADD COLUMN trial_bronze_used INTEGER DEFAULT 0",
@@ -333,6 +349,163 @@ def user_orders(uid):
                ORDER BY id DESC LIMIT 30""",
             (uid,),
         ).fetchall()
+
+
+
+def get_alpha_coins(uid):
+    with conn() as c:
+        row = c.execute(
+            "SELECT COALESCE(alpha_coins,0) AS alpha_coins FROM users WHERE id=?",
+            (uid,),
+        ).fetchone()
+        return int(row["alpha_coins"] or 0) if row else 0
+
+
+def add_alpha_coins(uid, amount, kind, order_id=None, description=""):
+    amount = int(amount or 0)
+    if amount <= 0:
+        return False
+
+    with LOCK, conn() as c:
+        if order_id is not None:
+            existing = c.execute(
+                """SELECT 1 FROM alpha_coin_ledger
+                   WHERE user_id=? AND order_id=? AND kind=?""",
+                (uid, order_id, kind),
+            ).fetchone()
+
+            if existing:
+                return False
+
+        cur = c.execute(
+            "UPDATE users SET alpha_coins=COALESCE(alpha_coins,0)+? WHERE id=?",
+            (amount, uid),
+        )
+
+        # Do not create a Coin ledger entry for a non-existent user.
+        if cur.rowcount == 0:
+            return False
+
+        c.execute(
+            """INSERT INTO alpha_coin_ledger
+               (user_id,order_id,kind,amount,description,created_at)
+               VALUES(?,?,?,?,?,?)""",
+            (
+                uid,
+                order_id,
+                kind,
+                amount,
+                description,
+                int(time.time()),
+            ),
+        )
+
+        return True
+
+
+def spend_alpha_coins(uid, amount, description=""):
+    amount = int(amount or 0)
+
+    if amount <= 0:
+        return False
+
+    with LOCK, conn() as c:
+        row = c.execute(
+            "SELECT COALESCE(alpha_coins,0) AS alpha_coins FROM users WHERE id=?",
+            (uid,),
+        ).fetchone()
+
+        if not row or int(row["alpha_coins"] or 0) < amount:
+            return False
+
+        c.execute(
+            "UPDATE users SET alpha_coins=alpha_coins-? WHERE id=?",
+            (amount, uid),
+        )
+
+        c.execute(
+            """INSERT INTO alpha_coin_ledger
+               (user_id,order_id,kind,amount,description,created_at)
+               VALUES(?,?,?,?,?,?)""",
+            (
+                uid,
+                None,
+                "spend",
+                -amount,
+                description,
+                int(time.time()),
+            ),
+        )
+
+        return True
+
+
+def alpha_coin_history(uid, limit=20):
+    with conn() as c:
+        return c.execute(
+            """SELECT * FROM alpha_coin_ledger
+               WHERE user_id=?
+               ORDER BY id DESC
+               LIMIT ?""",
+            (uid, int(limit)),
+        ).fetchall()
+
+
+def award_purchase_alpha_coins(order_id, buyer_id, paid_amount):
+    paid_amount = int(paid_amount or 0)
+
+    if paid_amount <= 0:
+        return {"buyer": 0, "referrer": 0}
+
+    # Buyer: 5% of paid amount.
+    # 1 ALC = 100 toman.
+    buyer_coins = paid_amount // 2000
+
+    # Referrer: 2.5% of paid amount.
+    referrer_coins = paid_amount // 4000
+
+    result = {
+        "buyer": 0,
+        "referrer": 0,
+    }
+
+    if buyer_coins > 0:
+        if add_alpha_coins(
+            buyer_id,
+            buyer_coins,
+            "purchase_reward",
+            order_id,
+            f"5% purchase reward for Order #{order_id}",
+        ):
+            result["buyer"] = buyer_coins
+
+    with conn() as c:
+        row = c.execute(
+            "SELECT referrer FROM users WHERE id=?",
+            (buyer_id,),
+        ).fetchone()
+
+    referrer_id = (
+        int(row["referrer"])
+        if row and row["referrer"]
+        else None
+    )
+
+    if (
+        referrer_id
+        and referrer_id != buyer_id
+        and referrer_coins > 0
+    ):
+        if add_alpha_coins(
+            referrer_id,
+            referrer_coins,
+            "referral_reward",
+            order_id,
+            f"2.5% referral reward for Order #{order_id}",
+        ):
+            result["referrer"] = referrer_coins
+
+    return result
 
 
 def referrals(uid):

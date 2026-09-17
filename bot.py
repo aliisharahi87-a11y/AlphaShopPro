@@ -394,52 +394,65 @@ async def gate(update, context):
     return False
 async def notify_referrer(update, context, referrer_id, new_user):
     """
-    وقتی کاربر جدید با لینک دعوت وارد می‌شود:
-    - یک کد تخفیف 5 درصدی برای معرف می‌سازد.
-    - کد را در دیتابیس ذخیره می‌کند.
-    - پیام کامل و صمیمانه برای معرف ارسال می‌کند.
+    New referral:
+    - New user receives a one-time 5% coupon.
+    - Referrer receives Alpha Coin only after successful purchases.
     """
     try:
-        # ساخت کد اختصاصی برای معرف
-        code = f"REF5_{referrer_id}_{new_user.id}"
+        code = f"REF5_{new_user.id}"
 
-        # جلوگیری از ساخت دوباره همان کد
-        existing = db.get_coupon(code)
-        if existing:
-            return
+        if not db.get_coupon(code):
+            db.create_coupon(
+                code,
+                percent=5,
+                max_uses=1,
+            )
 
-        # ساخت کد تخفیف 5 درصدی
-        db.create_coupon(
-            code,
-            percent=5,
-            max_uses=1,
-        )
+        name = new_user.first_name or "دوست جدید"
 
-        name = new_user.first_name or "یک کاربر جدید"
+        try:
+            if lang(new_user.id) == "fa":
+                new_user_message = (
+                    "🎉 <b>خوش آمدید به آلفا شاپ!</b> 🌹\n\n"
+                    "🎁 به دلیل ورود از لینک دعوت، "
+                    "<b>۵٪ تخفیف</b> برای شما فعال شد.\n\n"
+                    f"🎟 کد تخفیف:\n<code>{code}</code>\n\n"
+                    "💡 این کد یک‌بار قابل استفاده است."
+                )
+            else:
+                new_user_message = (
+                    "🎉 <b>Welcome to Alpha Shop!</b> 🌹\n\n"
+                    "🎁 You received a "
+                    "<b>5% discount</b> because you joined "
+                    "through a referral link.\n\n"
+                    f"🎟 Coupon:\n<code>{code}</code>\n\n"
+                    "💡 This coupon can be used once."
+                )
+
+            await context.bot.send_message(
+                chat_id=new_user.id,
+                text=new_user_message,
+                parse_mode="HTML",
+            )
+        except Exception as e:
+            print(f"Referral new-user message error: {e}")
 
         if lang(referrer_id) == "fa":
             message = (
-                "🎉 <b>تبریک! یک زیرمجموعه جدید به شما اضافه شد</b> 🌹\n\n"
-                f"👤 کاربر جدید: <b>{name}</b>\n"
+                "🎉 <b>یک زیرمجموعه جدید به شما اضافه شد!</b> 🌹\n\n"
+                f"👤 کاربر: <b>{name}</b>\n"
                 f"🆔 شناسه: <code>{new_user.id}</code>\n\n"
-                "🎁 به پاس دعوت موفق شما، یک کد تخفیف <b>۵٪</b> برایتان فعال شد.\n\n"
-                f"🎟 کد تخفیف شما:\n"
-                f"<code>{code}</code>\n\n"
-                "💡 این کد برای یک بار قابل استفاده است و می‌توانید "
-                "هنگام خرید سرویس از آن استفاده کنید.\n\n"
-                "🙏 ممنون که آلفا شاپ را به دوستانتان معرفی می‌کنید ❤️"
+                "🪙 از خریدهای موفق این کاربر، "
+                "<b>۲.۵٪ مبلغ پرداختی</b> به صورت Alpha Coin "
+                "برای شما ثبت می‌شود."
             )
         else:
             message = (
-                "🎉 <b>Congratulations! You got a new referral</b> 🌹\n\n"
-                f"👤 New user: <b>{name}</b>\n"
-                f"🆔 User ID: <code>{new_user.id}</code>\n\n"
-                "🎁 As a reward for your successful referral, "
-                "you received a <b>5% discount coupon</b>.\n\n"
-                f"🎟 Your coupon code:\n"
-                f"<code>{code}</code>\n\n"
-                "💡 This coupon can be used once when purchasing a service.\n\n"
-                "🙏 Thank you for recommending Alpha Shop to your friends ❤️"
+                "🎉 <b>You got a new referral!</b> 🌹\n\n"
+                f"👤 User: <b>{name}</b>\n"
+                f"🆔 ID: <code>{new_user.id}</code>\n\n"
+                "🪙 You receive <b>2.5%</b> of their "
+                "successful purchases as Alpha Coin."
             )
 
         await context.bot.send_message(
@@ -554,19 +567,115 @@ async def back_menu(update, context):
 
 
 async def wallet(update, context):
+    uid = update.effective_user.id
+
     if not await gate(update, context):
         return
-    uid = update.effective_user.id
-    keyboard = InlineKeyboardMarkup(
+
+    keyboard = InlineKeyboardMarkup([
         [
-            [InlineKeyboardButton(tr(uid, "deposit"), callback_data="deposit", style="success")],
-            [InlineKeyboardButton(tr(uid, "coupon"), callback_data="coupon", style="primary")],
-        ]
-    )
+            InlineKeyboardButton(
+                tr(uid, "deposit"),
+                callback_data="deposit",
+                style="success",
+            )
+        ],
+        [
+            InlineKeyboardButton(
+                "🪙 Alpha Coin",
+                callback_data="alpha_coin",
+                style="primary",
+            ),
+            InlineKeyboardButton(
+                tr(uid, "coupon"),
+                callback_data="coupon",
+                style="primary",
+            ),
+        ],
+    ])
+
     u = db.get_user(uid)
+    coins = db.get_alpha_coins(uid)
+
+    if lang(uid) == "fa":
+        text = (
+            "💰 <b>کیف پول شما</b>\n\n"
+            f"💵 موجودی تومان: <b>{u['balance']:,} تومان</b>\n"
+            f"🪙 Alpha Coin: <b>{coins:,} ALC</b>\n"
+            f"💎 ارزش Coin: <b>{coins * 100:,} تومان</b>"
+        )
+    else:
+        text = (
+            "💰 <b>Your Wallet</b>\n\n"
+            f"💵 Toman Balance: <b>{u['balance']:,}</b>\n"
+            f"🪙 Alpha Coin: <b>{coins:,} ALC</b>\n"
+            f"💎 Coin Value: <b>{coins * 100:,} Toman</b>"
+        )
+
     await update.message.reply_text(
-        tr(uid, "balance", amount=u["balance"]),
+        text,
         reply_markup=keyboard,
+        parse_mode="HTML",
+    )
+
+
+async def alpha_coin_callback(update, context):
+    query = update.callback_query
+    await query.answer()
+
+    uid = query.from_user.id
+    coins = db.get_alpha_coins(uid)
+    rows = db.alpha_coin_history(uid, 15)
+
+    if lang(uid) == "fa":
+        text = (
+            "🪙 <b>Alpha Coin</b>\n\n"
+            f"💰 موجودی: <b>{coins:,} ALC</b>\n"
+            f"💎 ارزش: <b>{coins * 100:,} تومان</b>\n\n"
+            "📜 <b>تاریخچه:</b>\n"
+        )
+
+        if not rows:
+            text += "هنوز تراکنشی ثبت نشده است."
+        else:
+            for row in rows:
+                amount = int(row["amount"])
+                sign = "+" if amount > 0 else ""
+                text += (
+                    f"\n{sign}{amount:,} ALC — "
+                    f"{row['description'] or row['kind']}"
+                )
+    else:
+        text = (
+            "🪙 <b>Alpha Coin</b>\n\n"
+            f"💰 Balance: <b>{coins:,} ALC</b>\n"
+            f"💎 Value: <b>{coins * 100:,} Toman</b>\n\n"
+            "📜 <b>History:</b>\n"
+        )
+
+        if not rows:
+            text += "No transactions yet."
+        else:
+            for row in rows:
+                amount = int(row["amount"])
+                sign = "+" if amount > 0 else ""
+                text += (
+                    f"\n{sign}{amount:,} ALC — "
+                    f"{row['description'] or row['kind']}"
+                )
+
+    await query.message.reply_text(
+        text,
+        parse_mode="HTML",
+        reply_markup=InlineKeyboardMarkup([
+            [
+                InlineKeyboardButton(
+                    "🔙 بازگشت" if lang(uid) == "fa" else "🔙 Back",
+                    callback_data="back_menu",
+                    style="primary",
+                )
+            ]
+        ]),
     )
 
 
@@ -747,6 +856,29 @@ async def buy(update, context):
 
     title = p["title_fa"] if lang(uid) == "fa" else p["title_en"]
 
+    # Show the Alpha Coin that can be used before confirmation.
+    # 1 ALC = 100 Toman, maximum 30% of the discounted price.
+    available_coins = int(db.get_alpha_coins(uid) or 0)
+    max_coin_by_order = (final_price * 30 // 100) // 100
+    usable_coins = min(available_coins, max_coin_by_order)
+    usable_coin_value = usable_coins * 100
+    payable_after_coin = final_price - usable_coin_value
+
+    if usable_coins > 0:
+        coin_fa = (
+            f"\n🪙 Alpha Coin قابل استفاده: <b>{usable_coins} ALC</b>"
+            f" (<b>{usable_coin_value:,} تومان</b>)"
+            f"\n💳 مبلغ پرداختی پس از Coin: <b>{payable_after_coin:,} تومان</b>"
+        )
+        coin_en = (
+            f"\n🪙 Usable Alpha Coin: <b>{usable_coins} ALC</b>"
+            f" (<b>{usable_coin_value:,} Toman</b>)"
+            f"\n💳 Payable after Coin: <b>{payable_after_coin:,} Toman</b>"
+        )
+    else:
+        coin_fa = "\n🪙 Alpha Coin قابل استفاده: <b>۰ ALC</b>"
+        coin_en = "\n🪙 Usable Alpha Coin: <b>0 ALC</b>"
+
     if lang(uid) == "fa":
         text = (
             "🛒 <b>تأیید خرید سرویس</b>\n\n"
@@ -755,7 +887,8 @@ async def buy(update, context):
             "👤 کاربران: <b>نامحدود</b>\n"
             f"💰 قیمت اصلی: <b>{original_price:,} تومان</b>"
             f"{discount_text}\n"
-            f"\n💳 <b>قیمت نهایی: {final_price:,} تومان</b>\n\n"
+            f"\n💳 <b>قیمت نهایی: {final_price:,} تومان</b>"
+            f"{coin_fa}\n\n"
             "اگر اطلاعات بالا درست است، روی «✅ تأیید پرداخت» بزنید."
         )
         confirm_text = "✅ تأیید پرداخت"
@@ -768,7 +901,8 @@ async def buy(update, context):
             "👤 Users: <b>Unlimited</b>\n"
             f"💰 Original price: <b>{original_price:,} Toman</b>"
             f"{discount_text}\n"
-            f"\n💳 <b>Final price: {final_price:,} Toman</b>\n\n"
+            f"\n💳 <b>Final price: {final_price:,} Toman</b>"
+            f"{coin_en}\n\n"
             "If everything is correct, tap «✅ Confirm Payment»."
         )
         confirm_text = "✅ Confirm Payment"
@@ -1028,22 +1162,39 @@ async def _complete_pending_purchase(update, context):
     pending = context.user_data.get("pending_purchase")
 
     if not pending:
-        await query.answer(ui(uid, "❌ سفارش منقضی شده است.", "❌ This order has expired."), show_alert=True)
+        await query.answer(
+            ui(uid, "❌ سفارش منقضی شده است.", "❌ This order has expired."),
+            show_alert=True,
+        )
         return
 
     await query.answer()
 
     u = db.get_user(uid)
     if not u:
-        await query.message.reply_text(ui(uid, "❌ حساب کاربری پیدا نشد.", "❌ User account not found."))
+        await query.message.reply_text(
+            ui(uid, "❌ حساب کاربری پیدا نشد.", "❌ User account not found.")
+        )
         context.user_data.pop("pending_purchase", None)
         return
 
-    price = int(pending["price"])
+    # Price after coupon/discount, before Alpha Coin
+    price_before_coin = int(pending["price"])
     gb = pending["gb"]
     unlimited = bool(pending["unlimited"])
     plan_id = pending["plan_id"]
     service = pending.get("service", "gold")
+
+    # Alpha Coin:
+    # 1 ALC = 100 Toman
+    # Maximum usable Coin = 30% of the order price
+    available_coins = int(db.get_alpha_coins(uid) or 0)
+    max_coin_by_order = (price_before_coin * 30 // 100) // 100
+    coin_amount = min(available_coins, max_coin_by_order)
+    coin_value = coin_amount * 100
+
+    # Actual Toman paid after Alpha Coin
+    price = price_before_coin - coin_value
 
     if u["balance"] < price:
         await query.message.reply_text(
@@ -1052,7 +1203,10 @@ async def _complete_pending_purchase(update, context):
         )
         return
 
+    # Create order using the actual cash amount.
+    # create_order() deducts this amount from the Toman wallet.
     oid = db.create_order(uid, plan_id, gb, price, service)
+
     if not oid:
         await query.message.reply_text(
             tr(uid, "not_enough", balance=u["balance"], price=price),
@@ -1060,12 +1214,54 @@ async def _complete_pending_purchase(update, context):
         )
         return
 
+    # Spend Alpha Coin only after the order exists, so the spend can
+    # be tied to the real order ID through the description.
+    if coin_amount > 0:
+        spent = db.spend_alpha_coins(
+            uid,
+            coin_amount,
+            f"Used for Order #{oid}",
+        )
+
+        if not spent:
+            # Coin balance changed between calculation and purchase.
+            # Return the Toman that was already deducted.
+            db.refund(oid, uid, price)
+
+            await query.message.reply_text(
+                ui(
+                    uid,
+                    "⚠️ موجودی Alpha Coin شما تغییر کرده است. لطفاً دوباره خرید را انجام دهید.",
+                    "⚠️ Your Alpha Coin balance changed. Please try the purchase again.",
+                ),
+                reply_markup=menu(uid),
+            )
+            return
+
     username = f"alpha_{uid}_{oid}"
-    result = await create_customer(username, gb, unlimited, service=service)
+    result = await create_customer(
+        username,
+        gb,
+        unlimited,
+        service=service,
+    )
 
     if not result["ok"]:
+        # Refund the actual Toman payment.
         db.refund(oid, uid, price)
+
+        # Refund the Alpha Coin that was spent.
+        if coin_amount > 0:
+            db.add_alpha_coins(
+                uid,
+                coin_amount,
+                "spend_refund",
+                oid,
+                f"Refunded Alpha Coin for failed Order #{oid}",
+            )
+
         context.user_data.pop("pending_purchase", None)
+
         await query.message.reply_text(
             tr(uid, "panel_error"),
             reply_markup=menu(uid),
@@ -1085,51 +1281,112 @@ async def _complete_pending_purchase(update, context):
         or data.get("url")
         or ""
     )
+
     final_username = data.get("username", username)
 
-    db.complete_order(oid, final_username, str(config))
+    db.complete_order(
+        oid,
+        final_username,
+        str(config),
+    )
 
-    service_label = TEXT[lang(uid)].get(service, service.title())
+    # Alpha Coin rewards are calculated from the actual Toman paid
+    # after discount AND after Alpha Coin usage.
+    coin_rewards = {
+        "buyer": 0,
+        "referrer": 0,
+    }
+
+    try:
+        coin_rewards = db.award_purchase_alpha_coins(
+            oid,
+            uid,
+            price,
+        )
+
+        print(
+            f"🪙 Alpha Coin awarded for order #{oid}: "
+            f"buyer={coin_rewards.get('buyer', 0)} ALC, "
+            f"referrer={coin_rewards.get('referrer', 0)} ALC"
+        )
+    except Exception as coin_error:
+        print(
+            f"⚠️ Alpha Coin reward failed for order #{oid}: "
+            f"{type(coin_error).__name__}: {coin_error}"
+        )
+
+    service_label = TEXT[lang(uid)].get(
+        service,
+        service.title(),
+    )
+
     user = db.get_user(uid)
+
     admin_text = (
         "🟢 <b>سفارش جدید با موفقیت ساخته شد</b>\n\n"
         f"🧾 سفارش: <code>#{oid}</code>\n"
         f"🔌 سرویس: <b>{service_label}</b>\n"
         f"📦 حجم: <b>{'Unlimited' if unlimited else str(gb) + ' GB'}</b>\n"
-        f"💰 مبلغ: <b>{price:,} تومان</b>\n"
+        f"💰 قیمت پس از تخفیف: <b>{price_before_coin:,} تومان</b>\n"
+        f"🪙 Alpha Coin مصرف‌شده: <b>{coin_amount} ALC</b>"
+        f" ({coin_value:,} تومان)\n"
+        f"💳 مبلغ پرداختی نهایی: <b>{price:,} تومان</b>\n"
         f"👤 کاربر: <b>{query.from_user.full_name}</b>\n"
         f"🆔 Telegram ID: <code>{uid}</code>\n"
         f"📛 Username: @{query.from_user.username or '-'}\n"
         f"🔑 Panel Username: <code>{final_username}</code>\n"
         f"🔗 Connection: {config or '-'}"
     )
+
     for admin_id in ADMIN_IDS:
         try:
-            await context.bot.send_message(admin_id, admin_text, parse_mode="HTML")
+            await context.bot.send_message(
+                admin_id,
+                admin_text,
+                parse_mode="HTML",
+            )
         except Exception as exc:
-            print("Admin notification failed:", admin_id, repr(exc))
+            print(
+                "Admin notification failed:",
+                admin_id,
+                repr(exc),
+            )
 
-    # Only clear coupon after successful purchase.
+    # Only clear purchase/coupon state after successful purchase.
     context.user_data.pop("pending_purchase", None)
     context.user_data.pop("custom_service", None)
     context.user_data.pop("coupon", None)
     context.user_data.pop("coupon_code", None)
 
+    buyer_coin = int(coin_rewards.get("buyer", 0))
+
     title = (
         f"🎉 سفارش شما با موفقیت ثبت شد!\n\n"
         f"🧾 شماره سفارش: #{oid}\n"
         f"📦 حجم: {'Unlimited' if unlimited else str(gb) + ' GB'}\n"
-        f"💰 مبلغ: {price:,} تومان\n"
+        f"💰 مبلغ پرداختی: {price:,} تومان\n"
+        f"🪙 Alpha Coin مصرف‌شده: {coin_amount} ALC"
+        f" ({coin_value:,} تومان)\n"
+        f"🪙 پاداش Alpha Coin: {buyer_coin} ALC\n"
         f"👤 نام کاربری: {final_username}"
     ) if lang(uid) == "fa" else (
         f"🎉 Your order was completed successfully!\n\n"
         f"🧾 Order: #{oid}\n"
         f"📦 Volume: {'Unlimited' if unlimited else str(gb) + ' GB'}\n"
-        f"💰 Amount: {price:,} Toman\n"
+        f"💰 Amount paid: {price:,} Toman\n"
+        f"🪙 Alpha Coin used: {coin_amount} ALC"
+        f" ({coin_value:,} Toman)\n"
+        f"🪙 Alpha Coin reward: {buyer_coin} ALC\n"
         f"👤 Username: {final_username}"
     )
-    await send_connection_card(query.message, uid, title, config, reply_markup=menu(uid))
 
+    await send_connection_card(
+        query.message,
+        uid,
+        title,
+        config,
+        reply_markup=menu(uid),
+    )
 
 async def confirm_buy(update, context):
     query = update.callback_query
@@ -1194,8 +1451,34 @@ async def referrals(update, context):
     me = await context.bot.get_me()
     count = db.referrals(uid)
     link = f"https://t.me/{me.username}?start={uid}"
+    coins = db.get_alpha_coins(uid)
+
+    if lang(uid) == "fa":
+        text = (
+            "👥 <b>زیرمجموعه‌گیری آلفا شاپ</b>\n\n"
+            f"👤 تعداد زیرمجموعه‌ها: <b>{count}</b>\n"
+            f"🪙 موجودی Alpha Coin: <b>{coins:,} ALC</b>\n\n"
+            "🎁 کاربر جدیدی که با لینک شما وارد شود، "
+            "<b>۵٪ تخفیف یک‌بارمصرف</b> دریافت می‌کند.\n"
+            "🪙 شما از هر خرید موفق او، "
+            "<b>۲.۵٪ مبلغ پرداختی</b> را به صورت Alpha Coin دریافت می‌کنید.\n\n"
+            f"🔗 لینک دعوت شما:\n{link}"
+        )
+    else:
+        text = (
+            "👥 <b>Alpha Shop Referrals</b>\n\n"
+            f"👤 Referrals: <b>{count}</b>\n"
+            f"🪙 Alpha Coin: <b>{coins:,} ALC</b>\n\n"
+            "🎁 New users joining through your link receive a "
+            "<b>5% one-time discount</b>.\n"
+            "🪙 You receive <b>2.5%</b> of every successful purchase "
+            "as Alpha Coin.\n\n"
+            f"🔗 Your referral link:\n{link}"
+        )
+
     await update.message.reply_text(
-        tr(uid, "ref", count=count, percent=REFERRAL_PERCENT, link=link)
+        text,
+        parse_mode="HTML",
     )
 
 
@@ -2356,6 +2639,12 @@ def run_bot():
     app.add_handler(CallbackQueryHandler(support_back_callback, pattern=r"^support_back$"))
     app.add_handler(CallbackQueryHandler(support_human_callback, pattern=r"^support_human$"))
     app.add_handler(CallbackQueryHandler(support_ai_callback, pattern=r"^support_ai$"))
+    app.add_handler(
+        CallbackQueryHandler(
+            alpha_coin_callback,
+            pattern=r"^alpha_coin$",
+        )
+    )
 
     app.add_handler(MessageHandler(filters.Regex(r"^(🛒 خرید سرویس|🔄 تمدید سرویس|🎁 تست رایگان|💰 کیف پول|👥 زیرمجموعه‌گیری|🟣 سفارش‌های فعال|📞 پشتیبانی|⚙️ تنظیمات|📚 راهنما|🛒 Buy Service|🔄 Renew Service|🎁 Free Trial|💰 Wallet|👥 Referrals|🟣 Active Services|📞 Support|⚙️ Settings|📚 Guide)$"), end_ai_mode), group=-1)
     app.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, ai_support_message), group=1)
