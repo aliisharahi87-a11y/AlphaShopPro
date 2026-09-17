@@ -1467,7 +1467,7 @@ async def referrals(update, context):
             "از هر خرید موفق زیرمجموعه‌های شما،\n"
             "<b>۲٫۵٪</b> مبلغ پرداختی را به صورت سکه آلفا دریافت می‌کنید.\n\n"
             f"🔗 <b>لینک دعوت شما:</b>\n"
-            f"<code>{link}</code>"
+            f"{link}"
         )
     else:
         text = (
