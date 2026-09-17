@@ -457,6 +457,77 @@ async def _pasargard_create_customer(
                 print(f"📥 CREATE {service.upper()} RESPONSE: {data}")
 
                 if response.status not in (200, 201):
+                    # Pasargard returns 409 when the username already exists.
+                    # Reuse the existing Bronze user and retrieve its subscription link.
+                    detail = ""
+                    if isinstance(data, dict):
+                        detail = str(
+                            data.get("detail")
+                            or data.get("message")
+                            or ""
+                        ).strip()
+
+                    if response.status == 409 and "already exists" in detail.lower():
+                        print(f"♻️ BRONZE USER ALREADY EXISTS: {username}")
+                        print("🔎 Fetching existing Bronze user...")
+
+                        existing_user = await _get_created_user(
+                            session,
+                            panel_url,
+                            headers,
+                            str(username).strip(),
+                        )
+
+                        connection = ""
+
+                        if isinstance(existing_user, dict):
+                            connection = str(
+                                existing_user.get("subscription_url")
+                                or existing_user.get("subscriptionUrl")
+                                or ""
+                            ).strip()
+
+                            if not connection:
+                                connection = _extract_connection(
+                                    existing_user,
+                                    panel_url,
+                                )
+
+                        if not connection:
+                            links = await _get_subscription_links(
+                                session,
+                                panel_url,
+                                headers,
+                                existing_user if isinstance(existing_user, dict) else {},
+                                str(username).strip(),
+                            )
+
+                            if links:
+                                connection = links[0]
+
+                        if connection:
+                            merged = (
+                                dict(existing_user)
+                                if isinstance(existing_user, dict)
+                                else {}
+                            )
+
+                            merged["username"] = str(username).strip()
+
+                            return {
+                                "ok": True,
+                                "data": merged,
+                                "username": str(username).strip(),
+                                "subscription_url": connection,
+                                "connection_details": connection,
+                                "config": connection,
+                            }
+
+                        print(
+                            "❌ Existing Bronze user found, "
+                            "but no subscription link was returned."
+                        )
+
                     return {
                         "ok": False,
                         "data": data,
