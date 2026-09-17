@@ -599,23 +599,15 @@ async def wallet(update, context):
 
     if lang(uid) == "fa":
         text = (
-            "👥 <b>زیرمجموعه‌گیری آلفا شاپ</b>\n\n"
-            f"👤 تعداد زیرمجموعه‌ها: <b>{count} نفر</b>\n"
-            f"🪙 موجودی سکه آلفا: <b>{coins:,} سکه</b>\n\n"
-            "🎁 <b>پاداش دعوت</b>\n"
-            "هر کاربر جدیدی که با لینک دعوت شما وارد شود،\n"
-            "یک کد تخفیف <b>۵٪</b> یک‌بارمصرف دریافت می‌کنید.\n\n"
-            "🪙 <b>پاداش خرید</b>\n"
-            "از هر خرید موفق زیرمجموعه‌های شما،\n"
-            "<b>۲٫۵٪</b> مبلغ پرداختی را به صورت سکه آلفا دریافت می‌کنید.\n\n"
-            f"🔗 <b>لینک دعوت شما:</b>\n"
-            f"<code>{link}</code>"
+            "💰 <b>کیف پول شما</b>\n\n"
+            f"💵 موجودی تومان: <b>{u['balance']:,} تومان</b>\n"
+            f"🪙 سکه آلفا: <b>{coins:,} سکه</b>"
         )
     else:
         text = (
             "💰 <b>Your Wallet</b>\n\n"
             f"💵 Toman Balance: <b>{u['balance']:,}</b>\n"
-            f"🪙 Alpha Coin: <b>{coins:,} ALC</b>\n"
+            f"🪙 Alpha Coin: <b>{coins:,} ALC</b>"
         )
 
     await update.message.reply_text(
@@ -623,7 +615,6 @@ async def wallet(update, context):
         reply_markup=keyboard,
         parse_mode="HTML",
     )
-
 
 async def alpha_coin_callback(update, context):
     query = update.callback_query
