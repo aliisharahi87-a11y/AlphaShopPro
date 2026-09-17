@@ -272,7 +272,6 @@ async def send_connection_card(message, uid, title, connection, extra_lines=None
 
     connection = str(connection).strip()
 
-    # Connection card
     image = build_connection_image(connection)
     caption = connection_caption(uid, title, connection, extra_lines)
 
@@ -280,32 +279,29 @@ async def send_connection_card(message, uid, title, connection, extra_lines=None
         caption = (
             html.escape(str(title))
             + "\n\n"
-            + ui(uid, "🔗 اطلاعات اتصال:", "🔗 Connection information:")
+            + ui(
+                uid,
+                "🔗 اطلاعات اتصال:",
+                "🔗 Connection information:"
+            )
+            + "\n\n"
+            + html.escape(connection)
         )
 
-    await message.reply_photo(
-        photo=image,
-        caption=caption,
-        parse_mode="HTML",
-    )
-
-    # Real Telegram Copy button
     copy_button = InlineKeyboardMarkup([
         [
             InlineKeyboardButton(
-                ui(uid, "📋 کپی لینک اشتراک", "📋 Copy subscription link"),
+                ui(uid, "📋 کپی لینک", "📋 Copy Link"),
                 copy_text=CopyTextButton(text=connection)
             )
         ]
     ])
 
-    await message.reply_text(
-        ui(uid, "🔗 لینک اشتراک:", "🔗 Subscription link:")
-        + "\n\n"
-        + f"<code>{html.escape(connection)}</code>",
+    await message.reply_photo(
+        photo=image,
+        caption=caption,
         parse_mode="HTML",
         reply_markup=copy_button,
-        disable_web_page_preview=True,
     )
 
 def lang(uid):
