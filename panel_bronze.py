@@ -108,6 +108,9 @@ def _walk_connection_values(obj, panel_url=""):
     found = []
 
     if isinstance(obj, dict):
+        # For Bronze/Pasargard, prioritize the real subscription fields.
+        # Generic "url"/"link" fields can point to a panel/config endpoint
+        # and may be incomplete, so they must be considered only as fallback.
         preferred_keys = (
             "subscription_url",
             "subscriptionUrl",
@@ -117,6 +120,9 @@ def _walk_connection_values(obj, panel_url=""):
             "subUrl",
             "subscription_link",
             "subscriptionLink",
+        )
+
+        fallback_keys = (
             "config_url",
             "configUrl",
             "connection_url",
@@ -128,7 +134,20 @@ def _walk_connection_values(obj, panel_url=""):
         for key in preferred_keys:
             value = obj.get(key)
             if isinstance(value, str) and value.strip():
-                found.append(_normalize_url(value, panel_url))
+                normalized = _normalize_url(value, panel_url)
+
+                # Subscription URLs must be complete HTTP(S) URLs.
+                if normalized.startswith(("https://", "http://")):
+                    found.append(normalized)
+
+        # Generic URL fields are fallback only.
+        for key in fallback_keys:
+            value = obj.get(key)
+            if isinstance(value, str) and value.strip():
+                normalized = _normalize_url(value, panel_url)
+
+                if normalized.startswith(("https://", "http://")):
+                    found.append(normalized)
 
         # Common nested containers.
         for key in (
