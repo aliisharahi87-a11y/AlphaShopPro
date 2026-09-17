@@ -23,6 +23,7 @@ from telegram.ext import (
 
 from config import *
 import database as db
+import ai_router
 from panel import create_customer, extend_customer, get_customer_info
 
 
@@ -2454,9 +2455,8 @@ async def support_ai_callback(update, context):
     await q.message.reply_text(tr(uid, "support_ai_intro"), parse_mode="HTML", reply_markup=menu(uid))
 
 async def ai_support_message(update, context):
-    print("🔥 AI SUPPORT HANDLER CALLED", flush=True)
-    print(f"🔎 AI MESSAGE USER: {update.effective_user.id if update.effective_user else None}", flush=True)
-    print(f"🔎 AI CONTEXT DATA: {dict(context.user_data)}", flush=True)
+    print("🔥 PROFESSIONAL AI HANDLER CALLED", flush=True)
+
     if not context.user_data.get("support_ai_mode"):
         print("⚠️ AI SUPPORT MODE IS OFF", flush=True)
         return
@@ -2477,286 +2477,94 @@ async def ai_support_message(update, context):
         return
 
     thinking_message = await update.message.reply_text(
-        "🤔 در حال فکر کردن..."
+        "🤔 در حال بررسی..."
     )
 
     history = context.user_data.setdefault(
-        "support_ai_history", []
+        "support_ai_history",
+        [],
     )
-
-    system_prompt = """
-تو دستیار هوش مصنوعی پشتیبانی Alpha Shop هستی.
-
-به کاربران درباره خرید کانفیگ، کیف پول، سفارش،
-تمدید، تست رایگان، V2Box، Hiddify، Happ،
-Streisand و مشکلات اتصال کمک کن.
-
-اگر کاربر فارسی صحبت کرد فارسی جواب بده.
-اگر انگلیسی صحبت کرد انگلیسی جواب بده.
-
-پاسخ‌ها کوتاه، واضح، دوستانه و کاربردی باشند.
-
-اگر مشکل نیاز به بررسی انسانی داشت:
-@AlphaShopSupport
-
-هرگز API Key، BOT_TOKEN یا اطلاعات محرمانه سیستم را افشا نکن.
-"""
-
-    history.append({
-        "role": "user",
-        "parts": [{"text": text}]
-    })
-
-    history[:] = history[-8:]
-
-    model = (GEMINI_MODEL or "gemini-3.6-flash").strip()
-
-    if model.startswith("models/"):
-        model = model[len("models/"):]
-
-    url = (
-        "https://generativelanguage.googleapis.com/"
-        f"v1beta/models/{model}:generateContent"
-    )
-
-    headers = {
-        "Content-Type": "application/json",
-        "x-goog-api-key": GEMINI_API_KEY,
-    }
-
-    # Gemini 3.8:
-    # temperature حذف شده تا با تنظیمات جدید مدل سازگار باشد.
-    payload = {
-        "system_instruction": {
-            "parts": [
-                {"text": system_prompt}
-            ]
-        },
-        "contents": history,
-        "generationConfig": {
-            "maxOutputTokens": 700
-        }
-    }
-
-    answer = None
-    last_error = None
-
-    print("🚀 GEMINI REQUEST BLOCK ENTERED", flush=True)
-    print(f"🔑 GEMINI KEY EXISTS: {bool(GEMINI_API_KEY)}", flush=True)
-    print(f"🤖 GEMINI MODEL: {model}", flush=True)
-    print(f"🌐 GEMINI URL: {url}", flush=True)
 
     try:
-        # فقط یک درخواست اصلی + یک retry سریع
-        for attempt in range(2):
-            print(f"🚀 GEMINI ATTEMPT {attempt + 1}", flush=True)
+        model = (
+            GEMINI_MODEL or "gemini-3.6-flash"
+        ).strip()
 
-            try:
-                timeout = aiohttp.ClientTimeout(
-                    total=30.0,
-                    connect=5.0,
-                    sock_connect=5.0,
-                    sock_read=25.0,
-                )
+        result = await ai_router.professional_ai(
+            api_key=GEMINI_API_KEY,
+            model=model,
+            user_id=uid,
+            user_text=text,
+            history=history,
+        )
 
-                async with aiohttp.ClientSession(
-                    timeout=timeout
-                ) as session:
+        new_history = result.get("history")
 
-                    print("🌐 BEFORE GEMINI HTTP POST", flush=True)
-                    async with session.post(
-                        url,
-                        headers=headers,
-                        json=payload,
-                    ) as resp:
-                        print("🌐 GEMINI HTTP RESPONSE RECEIVED", flush=True)
-
-                        print("📥 BEFORE READING GEMINI BODY", flush=True)
-                        raw = await asyncio.wait_for(resp.text(), timeout=10.0)
-                        print("📥 GEMINI BODY READ", flush=True)
-                        print("📦 GEMINI RAW LENGTH:", len(raw), flush=True)
-                        print("📦 GEMINI RAW RESPONSE:", raw[:3000], flush=True)
-
-                        print(
-                            f"🤖 Gemini HTTP {resp.status} "
-                            f"(attempt {attempt + 1}/2)"
-                        )
-
-                        if resp.status >= 400:
-                            print(
-                                "❌ Gemini API error:",
-                                raw[:1200]
-                            )
-
-                            last_error = (
-                                f"HTTP {resp.status}"
-                            )
-
-                            # خطاهای موقت
-                            if resp.status in (
-                                429,
-                                500,
-                                502,
-                                503,
-                                504,
-                            ) and attempt == 0:
-
-                                await asyncio.sleep(0.8)
-                                continue
-
-                            raise RuntimeError(
-                                f"Gemini HTTP {resp.status}"
-                            )
-
-                        data = json.loads(raw)
-
-                        candidates = data.get(
-                            "candidates", []
-                        )
-
-                        if not candidates:
-                            raise RuntimeError(
-                                "No candidates"
-                            )
-
-                        answer_parts = []
-
-                        for candidate in candidates:
-                            content = candidate.get("content") or {}
-                            parts = content.get("parts") or []
-
-                            for part in parts:
-                                if not isinstance(part, dict):
-                                    continue
-
-                                text = part.get("text")
-
-                                if isinstance(text, str) and text.strip():
-                                    answer_parts.append(text.strip())
-
-                        answer = "\n".join(answer_parts).strip()
-
-                        print(
-                            "🧩 GEMINI TEXT PARTS:",
-                            len(answer_parts),
-                            flush=True,
-                        )
-
-                        if not answer:
-                            raise RuntimeError(
-                                "Empty Gemini response"
-                            )
-
-                        break
-
-            except asyncio.TimeoutError:
-                last_error = "timeout"
-
-                print(
-                    f"⏱️ Gemini timeout "
-                    f"(attempt {attempt + 1}/2)"
-                )
-
-                if attempt == 0:
-                    await asyncio.sleep(0.5)
-                    continue
-
-                raise RuntimeError(
-                    "Gemini timeout"
-                )
-
-            except aiohttp.ClientError as e:
-                last_error = str(e)
-
-                print(
-                    f"🌐 Gemini network error: {e}"
-                )
-
-                if attempt == 0:
-                    await asyncio.sleep(0.5)
-                    continue
-
-                raise RuntimeError(
-                    "Gemini network error"
-                )
-
-        if not answer:
-            raise RuntimeError(
-                last_error or "No answer"
+        if isinstance(new_history, list):
+            context.user_data["support_ai_history"] = (
+                new_history[-8:]
             )
 
-        history.append({
-            "role": "model",
-            "parts": [{"text": answer}]
-        })
+        if not result.get("ok"):
+            answer = result.get(
+                "answer",
+                tr(uid, "support_ai_error"),
+            )
+        else:
+            answer = (
+                result.get("answer")
+                or tr(uid, "support_ai_error")
+            )
 
-        history[:] = history[-8:]
-
-        # همان پیام را ویرایش می‌کنیم
         try:
-            await thinking_message.edit_text(answer)
+            await thinking_message.edit_text(
+                answer
+            )
         except Exception as edit_error:
             print(
-                f"⚠️ THINKING MESSAGE EDIT FAILED: "
-                f"{type(edit_error).__name__}: {edit_error}",
+                "⚠️ PROFESSIONAL AI EDIT FAILED: "
+                f"{type(edit_error).__name__}: "
+                f"{edit_error}",
                 flush=True,
             )
+
             try:
-                await update.message.reply_text(answer)
+                await update.message.reply_text(
+                    answer
+                )
             except Exception as reply_error:
                 print(
-                    f"⚠️ ANSWER REPLY FAILED: "
-                    f"{type(reply_error).__name__}: {reply_error}",
+                    "⚠️ PROFESSIONAL AI REPLY FAILED: "
+                    f"{type(reply_error).__name__}: "
+                    f"{reply_error}",
                     flush=True,
                 )
 
     except Exception as e:
         print(
-            f"❌ Gemini final error: "
+            "❌ Professional AI error: "
             f"{type(e).__name__}: {e}",
             flush=True,
         )
 
-        # پیام مناسب برای quota یا خطاهای عادی Gemini
-        if "429" in str(e) or "quota" in str(e).lower():
-            error_message = (
-                "⚠️ سهمیه رایگان هوش مصنوعی فعلاً به پایان رسیده است.\\n\\n"
-                "لطفاً کمی بعد دوباره امتحان کنید.\\n"
-                "این مشکل موقتی است و ربطی به حساب، سفارش یا کیف پول شما ندارد.\\n\\n"
-                "👨‍💻 پشتیبانی: @AlphaShopSupport"
-            )
-        else:
-            error_message = (
-                "⚠️ فعلاً هوش مصنوعی در دسترس نیست.\\n\\n"
-                "لطفاً چند ثانیه بعد دوباره امتحان کن.\\n"
-                "اگر مشکل ادامه داشت، با پشتیبانی تماس بگیر:\\n"
-                "@AlphaShopSupport"
-            )
+        error_message = (
+            "⚠️ فعلاً هوش مصنوعی در دسترس نیست.\n\n"
+            "لطفاً چند ثانیه بعد دوباره امتحان کن.\n"
+            "اگر مشکل ادامه داشت، با پشتیبانی تماس بگیر:\n"
+            "@AlphaShopSupport"
+        )
 
-        # هیچ وقت پیام روی "در حال فکر کردن" باقی نمی‌ماند.
         try:
-            await thinking_message.edit_text(error_message)
-
+            await thinking_message.edit_text(
+                error_message
+            )
         except Exception as final_error:
             print(
-                f"⚠️ FINAL THINKING MESSAGE EDIT FAILED: "
-                f"{type(final_error).__name__}: {final_error}",
+                "⚠️ FINAL AI MESSAGE FAILED: "
+                f"{type(final_error).__name__}: "
+                f"{final_error}",
                 flush=True,
             )
-            try:
-                await update.message.reply_text(
-                    "⚠️ فعلاً هوش مصنوعی در دسترس نیست.\n\n"
-                    "لطفاً چند ثانیه بعد دوباره امتحان کن.\n"
-                    "اگر مشکل ادامه داشت، با پشتیبانی تماس بگیر:\n"
-                    "@AlphaShopSupport"
-                )
-            except Exception as reply_error:
-                print(
-                    f"⚠️ FINAL REPLY FAILED: "
-                    f"{type(reply_error).__name__}: {reply_error}",
-                    flush=True,
-                )
-
 
 async def end_ai_mode(update, context):
     if context.user_data.get("support_ai_mode"):
