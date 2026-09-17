@@ -2452,7 +2452,16 @@ async def support_ai_callback(update, context):
     context.user_data["support_ai_history"] = []
     print(f"🟢 AI MODE SET: {context.user_data.get('support_ai_mode')}", flush=True)
     print(f"🟢 AI HISTORY SET: {context.user_data.get('support_ai_history')}", flush=True)
-    await q.message.reply_text(tr(uid, "support_ai_intro"), parse_mode="HTML", reply_markup=menu(uid))
+    await q.message.reply_text(
+        "🤖 <b>گفت‌وگو با هوش مصنوعی Alpha Shop فعال شد!</b>\n\n"
+        "💬 پیام خودت را همین‌جا بفرست تا راهنماییت کنم.\n\n"
+        "✨ می‌تونی درباره خرید سرویس، کیف پول، سفارش‌ها، "
+        "تمدید، مشکلات اتصال و سوالات مربوط به سرویس‌ها ازم بپرسی.\n\n"
+        "🚪 <b>برای خروج از گفت‌وگو با هوش مصنوعی، "
+        "فقط یکی از دکمه‌های منوی پایین را انتخاب کن.</b>",
+        parse_mode="HTML",
+        reply_markup=menu(uid),
+    )
 
 async def ai_support_message(update, context):
     print("🔥 PROFESSIONAL AI HANDLER CALLED", flush=True)
@@ -2516,9 +2525,39 @@ async def ai_support_message(update, context):
                 or tr(uid, "support_ai_error")
             )
 
+        # Convert common Markdown formatting from AI
+        # to Telegram HTML formatting.
+        import re
+        import html
+
+        def format_ai_answer(text):
+            text = str(text or "").strip()
+
+            # Escape HTML first so AI output cannot inject markup.
+            text = html.escape(text)
+
+            # **bold** -> <b>bold</b>
+            text = re.sub(
+                r"\*\*(.+?)\*\*",
+                r"<b>\1</b>",
+                text,
+            )
+
+            # *italic* -> <i>italic</i>
+            text = re.sub(
+                r"(?<!\*)\*([^*\n]+?)\*(?!\*)",
+                r"<i>\1</i>",
+                text,
+            )
+
+            return text
+
+        formatted_answer = format_ai_answer(answer)
+
         try:
             await thinking_message.edit_text(
-                answer
+                formatted_answer,
+                parse_mode="HTML",
             )
         except Exception as edit_error:
             print(
@@ -2530,7 +2569,8 @@ async def ai_support_message(update, context):
 
             try:
                 await update.message.reply_text(
-                    answer
+                    formatted_answer,
+                    parse_mode="HTML",
                 )
             except Exception as reply_error:
                 print(
