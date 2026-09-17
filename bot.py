@@ -2220,6 +2220,23 @@ async def trial_service(update, context):
     await send_connection_card(q.message, uid, title, config, extra_lines=extra, reply_markup=menu(uid))
 
 
+async def copytest(update, context):
+    await update.message.reply_text(
+        "🔗 لینک تست:\n\nhttps://example.com/test",
+        reply_markup=InlineKeyboardMarkup([
+            [
+                InlineKeyboardButton(
+                    "📋 کپی لینک",
+                    copy_text=CopyTextButton(
+                        text="https://example.com/test"
+                    )
+                )
+            ]
+        ]),
+        disable_web_page_preview=True,
+    )
+
+
 def run_bot():
     import asyncio
 
@@ -2466,6 +2483,7 @@ def run_bot():
     print("🌹 AlphaShop Pro Bot Running...")
 
 
+    app.add_handler(CommandHandler("copytest", copytest))
     app.run_polling(
         drop_pending_updates=True,
         close_loop=False,
