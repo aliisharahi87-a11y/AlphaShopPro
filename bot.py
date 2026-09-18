@@ -3741,6 +3741,13 @@ def run_bot():
 
     app = Application.builder().token(BOT_TOKEN).build()
 
+    # Automatic service expiry / volume warnings
+    app.job_queue.run_repeating(
+        automatic_expiry_warning_job,
+        interval=300,
+        first=30,
+    )
+
     print("✅ Telegram Application created")
 
     deposit_conv = ConversationHandler(

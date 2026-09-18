@@ -683,7 +683,7 @@ async def _pasarguard_user_info(username, service="bronze"):
                 return {"ok": False, "error": "User not found on panel"}
             links = await _get_subscription_links(session, panel_url, headers, user_data, username)
             connection = _fix_bronze_https(_extract_connection(user_data, panel_url), panel_url) or (links[0] if links else "")
-            return {"ok": True, "user": user_data, "subscription_url": connection, "expire": user_data.get("expire"), "data_limit": user_data.get("data_limit"), "status": user_data.get("status")}
+            return {"ok": True, "user": user_data, "subscription_url": connection, "expire": user_data.get("expire"), "data_limit": user_data.get("data_limit"), "used_traffic": user_data.get("used_traffic"), "status": user_data.get("status")}
         except Exception as exc:
             print(f"❌ {service.upper()} USER INFO EXCEPTION: {exc!r}")
             return {"ok": False, "error": str(exc)}

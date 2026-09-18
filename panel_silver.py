@@ -419,6 +419,7 @@ async def extend_customer(username, days=30):
             token = await _login(session, panel_url)
             headers = {"Authorization": f"Bearer {token}", "Accept": "application/json", "Content-Type": "application/json"}
             async with session.get(f"{panel_url}/api/user/{username}", headers=headers) as r:
+                print(f"📊 SILVER USER RAW RESPONSE: {data}")
                 current = await _json(r)
                 if r.status != 200:
                     raise RuntimeError(f"Marzban get user HTTP {r.status}: {current}")
@@ -462,7 +463,9 @@ async def get_customer_info(username):
                 if r.status != 200:
                     return {"ok": False, "error": f"Marzban get user HTTP {r.status}: {data}"}
             connection = _first_url(data)
-            return {"ok": True, "user": data, "subscription_url": connection, "expire": data.get("expire") if isinstance(data, dict) else None, "data_limit": data.get("data_limit") if isinstance(data, dict) else None, "status": data.get("status") if isinstance(data, dict) else None}
+            return {"ok": True, "user": data, "subscription_url": connection, "expire": data.get("expire") if isinstance(data, dict) else None, "data_limit": data.get("data_limit") if isinstance(data, dict) else None,
+                "used_traffic": data.get("used_traffic") if isinstance(data, dict) else None,
+                "status": data.get("status") if isinstance(data, dict) else None}
         except Exception as exc:
             print(f"❌ SILVER USER INFO EXCEPTION: {exc!r}")
             return {"ok": False, "error": str(exc)}
