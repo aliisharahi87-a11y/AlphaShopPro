@@ -2056,7 +2056,7 @@ async def _complete_pending_purchase(update, context):
         f"🪙 سکه آلفا مصرف‌شده: {coin_amount} ALC"
         f" ({coin_value:,} تومان)\n"
         f"🎁 پاداش سکه آلفا: {buyer_coin} ALC\n"
-        f"👤 نام کاربری: {final_username}"
+        f"👤 نام کاربری: <code>{final_username}</code>"
     ) if lang(uid) == "fa" else (
         f"🎉 Your order was completed successfully!\n\n"
         f"🧾 Order: #{oid}\n"
@@ -2065,7 +2065,7 @@ async def _complete_pending_purchase(update, context):
         f"🪙 Alpha Coin used: {coin_amount} ALC"
         f" ({coin_value:,} Toman)\n"
         f"🪙 Alpha Coin reward: {buyer_coin} ALC\n"
-        f"👤 Username: {final_username}"
+        f"👤 Username: <code>{final_username}</code>"
     )
 
     await send_connection_card(
