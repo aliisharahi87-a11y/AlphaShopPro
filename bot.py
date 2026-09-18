@@ -753,7 +753,18 @@ async def mission_claim_callback(update, context):
     )
 
     if not stage:
-        await query.answer("❌ مرحله پیدا نشد.", show_alert=True)
+        await query.answer(
+            "❌ مرحله پیدا نشد.",
+            show_alert=True,
+        )
+        return
+
+    # The stage must be unlocked before claiming.
+    if not db.mission_stage_unlocked(uid, stage_id):
+        await query.answer(
+            "🔒 این مرحله هنوز قفل است.",
+            show_alert=True,
+        )
         return
 
     missions = db.stage_missions(stage_id)
@@ -807,35 +818,93 @@ async def mission_claim_callback(update, context):
         )
         return
 
+    # Find the next stage.
+    next_stage_id = stage_id + 1
+    next_stage = next(
+        (
+            x for x in stages
+            if int(x["id"]) == next_stage_id
+        ),
+        None,
+    )
+
+    new_balance = db.get_alpha_coins(uid)
+
     if lang(uid) == "fa":
-        text = (
-            f"🎉 <b>مرحله {title} تکمیل شد!</b>\n\n"
-            f"🪙 <b>{reward:,} ALC</b> به موجودی شما اضافه شد.\n\n"
-            f"💰 موجودی جدید: "
-            f"<b>{db.get_alpha_coins(uid):,} ALC</b>"
-        )
+        if next_stage:
+            next_title = next_stage["title_fa"]
+
+            text = (
+                f"🎉 <b>مرحله {title} با موفقیت تکمیل شد!</b>\n\n"
+                f"🪙 <b>{reward:,} ALC</b> به موجودی شما اضافه شد.\n\n"
+                f"💰 موجودی جدید: <b>{new_balance:,} ALC</b>\n\n"
+                f"🔓 <b>مرحله بعدی باز شد!</b>\n"
+                f"🎯 {next_title}\n\n"
+                "🚀 حالا می‌توانید مأموریت‌های مرحله بعد را شروع کنید."
+            )
+
+            next_button = InlineKeyboardButton(
+                f"🎯 مشاهده {next_title}",
+                callback_data=f"mission_stage:{next_stage_id}",
+                style="primary",
+            )
+        else:
+            text = (
+                f"🎉 <b>مرحله {title} با موفقیت تکمیل شد!</b>\n\n"
+                f"🪙 <b>{reward:,} ALC</b> به موجودی شما اضافه شد.\n\n"
+                f"💰 موجودی جدید: <b>{new_balance:,} ALC</b>\n\n"
+                "🏆 <b>تبریک! تمام مراحل موجود را تکمیل کردید.</b>"
+            )
+            next_button = None
+
         back_text = "🎯 بازگشت به مأموریت‌ها"
+
     else:
-        text = (
-            f"🎉 <b>{title} completed!</b>\n\n"
-            f"🪙 <b>{reward:,} ALC</b> has been added to your balance.\n\n"
-            f"💰 New balance: "
-            f"<b>{db.get_alpha_coins(uid):,} ALC</b>"
-        )
+        if next_stage:
+            next_title = next_stage["title_en"]
+
+            text = (
+                f"🎉 <b>{title} completed successfully!</b>\n\n"
+                f"🪙 <b>{reward:,} ALC</b> has been added to your balance.\n\n"
+                f"💰 New balance: <b>{new_balance:,} ALC</b>\n\n"
+                f"🔓 <b>Next stage unlocked!</b>\n"
+                f"🎯 {next_title}\n\n"
+                "🚀 You can now start the missions of the next stage."
+            )
+
+            next_button = InlineKeyboardButton(
+                f"🎯 View {next_title}",
+                callback_data=f"mission_stage:{next_stage_id}",
+                style="primary",
+            )
+        else:
+            text = (
+                f"🎉 <b>{title} completed successfully!</b>\n\n"
+                f"🪙 <b>{reward:,} ALC</b> has been added to your balance.\n\n"
+                f"💰 New balance: <b>{new_balance:,} ALC</b>\n\n"
+                "🏆 <b>Congratulations! You completed all available stages.</b>"
+            )
+            next_button = None
+
         back_text = "🎯 Back to Missions"
+
+    buttons = []
+
+    if next_button:
+        buttons.append([next_button])
+
+    buttons.append([
+        InlineKeyboardButton(
+            back_text,
+            callback_data="missions",
+            style="success",
+        )
+    ])
 
     await query.message.reply_text(
         text,
         parse_mode="HTML",
-        reply_markup=InlineKeyboardMarkup([
-            [
-                InlineKeyboardButton(
-                    back_text,
-                    callback_data="missions",
-                    style="success",
-                )
-            ]
-        ]),
+        reply_markup=InlineKeyboardMarkup(buttons),
     )
 
 async def mission_stage_callback(update, context):
@@ -864,16 +933,51 @@ async def mission_stage_callback(update, context):
 
     # Check stage lock.
     if not db.mission_stage_unlocked(uid, stage_id):
+        previous_stage_id = stage_id - 1
+        previous_stage = next(
+            (
+                x for x in stages
+                if int(x["id"]) == previous_stage_id
+            ),
+            None,
+        )
+
         if lang(uid) == "fa":
-            await query.answer(
-                "🔒 این مرحله هنوز قفل است. ابتدا مرحله قبلی را کامل کنید.",
-                show_alert=True,
+            previous_title = (
+                previous_stage["title_fa"]
+                if previous_stage
+                else "مرحله قبلی"
+            )
+
+            await query.answer()
+
+            await query.message.reply_text(
+                "🔒 <b>این مرحله هنوز قفل است</b>\n\n"
+                f"برای باز شدن این مرحله، ابتدا باید "
+                f"تمام مأموریت‌های <b>{previous_title}</b> را "
+                "تکمیل کنید.\n\n"
+                "🎯 بعد از تکمیل مرحله قبلی، این مرحله "
+                "به‌صورت خودکار برای شما باز می‌شود. 🔓",
+                parse_mode="HTML",
             )
         else:
-            await query.answer(
-                "🔒 This stage is locked. Complete the previous stage first.",
-                show_alert=True,
+            previous_title = (
+                previous_stage["title_en"]
+                if previous_stage
+                else "Previous Stage"
             )
+
+            await query.answer()
+
+            await query.message.reply_text(
+                "🔒 <b>This stage is locked</b>\n\n"
+                f"First complete all missions in "
+                f"<b>{previous_title}</b> to unlock this stage.\n\n"
+                "🎯 Once the previous stage is completed, "
+                "this stage will automatically unlock. 🔓",
+                parse_mode="HTML",
+            )
+
         return
 
     missions = db.stage_missions(stage_id)
