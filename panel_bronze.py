@@ -525,72 +525,15 @@ async def _pasargard_create_customer(
                             or ""
                         ).strip()
 
-                    if response.status == 409 and "already exists" in detail.lower():
-                        print(f"♻️ BRONZE USER ALREADY EXISTS: {username}")
-                        print("🔎 Fetching existing Bronze user...")
-
-                        existing_user = await _get_created_user(
-                            session,
-                            panel_url,
-                            headers,
-                            str(username).strip(),
-                        )
-
-                        connection = ""
-
-                        if isinstance(existing_user, dict):
-                            connection = str(
-                                existing_user.get("subscription_url")
-                                or existing_user.get("subscriptionUrl")
-                                or ""
-                            ).strip()
-
-                            if not connection:
-                                connection = _extract_connection(
-                                    existing_user,
-                                    panel_url,
-                                )
-
-                        if not connection:
-                            links = await _get_subscription_links(
-                                session,
-                                panel_url,
-                                headers,
-                                existing_user if isinstance(existing_user, dict) else {},
-                                str(username).strip(),
-                            )
-
-                            if links:
-                                for link in links:
-                                    fixed = _fix_bronze_https(link, panel_url)
-                                    if fixed:
-                                        connection = fixed
-                                        break
-
-                        connection = _fix_bronze_https(connection, panel_url)
-
-                        if connection:
-                            merged = (
-                                dict(existing_user)
-                                if isinstance(existing_user, dict)
-                                else {}
-                            )
-
-                            merged["username"] = str(username).strip()
-
-                            return {
-                                "ok": True,
-                                "data": merged,
-                                "username": str(username).strip(),
-                                "subscription_url": connection,
-                                "connection_details": connection,
-                                "config": connection,
-                            }
-
-                        print(
-                            "❌ Existing Bronze user found, "
-                            "but no subscription link was returned."
-                        )
+                    if response.status == 409:
+                        print(f"❌ {service.upper()} USER ALREADY EXISTS: {username}")
+                        return {
+                            "ok": False,
+                            "data": {"error": f"User already exists: {username}", "panel": data},
+                            "subscription_url": "",
+                            "connection_details": "",
+                            "config": "",
+                        }
 
                     return {
                         "ok": False,
@@ -636,6 +579,28 @@ async def _pasargard_create_customer(
                 or (data.get("username") if isinstance(data, dict) else None)
                 or str(username).strip()
             )
+
+            # Strictly enforce the exact purchased volume and expiry.
+            expected_expire_ts = int((datetime.now().astimezone() + timedelta(days=int(days))).timestamp())
+            expected_limit = 0 if unlimited else int(float(gb) * GB)
+            expected_expire = datetime.fromtimestamp(expected_expire_ts).astimezone().isoformat(timespec="seconds")
+            verified = await _get_created_user(session, panel_url, headers, str(username).strip())
+            verified_limit = verified.get("data_limit") if isinstance(verified, dict) else None
+            verified_expire = verified.get("expire") if isinstance(verified, dict) else None
+            verified_expire_ts = _expire_timestamp(verified_expire) if isinstance(verified_expire, (str, int, float)) else None
+            if int(verified_limit or -1) != int(expected_limit) or verified_expire_ts is None or abs(int(verified_expire_ts) - expected_expire_ts) > 120:
+                print(f"⚠️ {service.upper()} MISMATCH: limit={verified_limit}/{expected_limit}, expire={verified_expire}/{expected_expire}")
+                await _enforce_exact_limits(session, panel_url, headers, str(username).strip(), expected_limit, expected_expire)
+                verified = await _get_created_user(session, panel_url, headers, str(username).strip())
+                verified_limit = verified.get("data_limit") if isinstance(verified, dict) else None
+                verified_expire = verified.get("expire") if isinstance(verified, dict) else None
+                verified_expire_ts = _expire_timestamp(verified_expire) if isinstance(verified_expire, (str, int, float)) else None
+                if int(verified_limit or -1) != int(expected_limit) or verified_expire_ts is None or abs(int(verified_expire_ts) - expected_expire_ts) > 120:
+                    raise RuntimeError(f"Panel rejected exact limits: limit={verified_limit}/{expected_limit}, expire={verified_expire}/{expected_expire}")
+            if isinstance(verified, dict):
+                merged["verified_user"] = verified
+                merged["data_limit"] = verified.get("data_limit")
+                merged["expire"] = verified.get("expire")
 
             print(f"🔗 {service.upper()} CONNECTION: {connection or '<EMPTY>'}")
 
@@ -703,6 +668,27 @@ def _expire_timestamp(value):
         return int(datetime.fromisoformat(text.replace("Z", "+00:00")).timestamp())
     except Exception:
         return None
+
+
+async def _enforce_exact_limits(session, panel_url, headers, username, expected_limit, expected_expire):
+    payload = {
+        "data_limit": int(expected_limit),
+        "expire": expected_expire,
+        "status": "active",
+        "data_limit_reset_strategy": "no_reset",
+    }
+    last = None
+    for endpoint in (f"{panel_url}/api/user/by-username/{username}", f"{panel_url}/api/user/{username}"):
+        try:
+            async with session.put(endpoint, headers=headers, json=payload) as r:
+                data = await _read_json(r)
+                print(f"🛠️ EXACT LIMIT UPDATE HTTP {r.status}: {data}")
+                last = data
+                if r.status in (200, 201):
+                    return data
+        except (aiohttp.ClientError, asyncio.TimeoutError) as exc:
+            last = {"error": repr(exc)}
+    raise RuntimeError(f"PasarGuard exact limit update failed: {last}")
 
 
 async def _extend_pasarguard_customer(username, days=30, service="bronze"):

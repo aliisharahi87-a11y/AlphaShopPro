@@ -329,7 +329,7 @@ async def create_customer(username, gb, unlimited=False, days=30, group_ids=None
                     data = last
 
             if status == 409:
-                pass
+                raise RuntimeError(f"Marzban user already exists: {username}")
             elif status not in (200, 201):
                 raise RuntimeError(
                     f"Marzban create user HTTP {status}: {data}"
@@ -384,6 +384,35 @@ async def create_customer(username, gb, unlimited=False, days=30, group_ids=None
                     "https://pan.linkesubs.com/sub/"
                     + connection.split("https://sub/", 1)[1]
                 )
+
+            # Strictly enforce the exact purchased volume and expiry.
+            expected_limit = 0 if unlimited else int(float(gb) * GB)
+            expected_expire = int(time.time()) + int(days) * 86400
+            async with session.get(f"{panel_url}/api/user/{username}", headers=headers) as r:
+                verify = await _json(r)
+                if r.status != 200:
+                    raise RuntimeError(f"Marzban verification HTTP {r.status}: {verify}")
+            got_limit = verify.get("data_limit") if isinstance(verify, dict) else None
+            got_expire = verify.get("expire") if isinstance(verify, dict) else None
+            if int(got_limit or -1) != expected_limit or got_expire is None or abs(int(got_expire) - expected_expire) > 120:
+                print(f"⚠️ SILVER MISMATCH: limit={got_limit}/{expected_limit}, expire={got_expire}/{expected_expire}")
+                update_payload = {"data_limit": expected_limit, "expire": expected_expire, "status": "active"}
+                async with session.put(f"{panel_url}/api/user/{username}", headers=headers, json=update_payload) as r:
+                    update_data = await _json(r)
+                    print(f"🛠️ SILVER EXACT LIMIT UPDATE HTTP {r.status}: {update_data}")
+                    if r.status not in (200, 201):
+                        raise RuntimeError(f"Marzban exact limit update HTTP {r.status}: {update_data}")
+                async with session.get(f"{panel_url}/api/user/{username}", headers=headers) as r:
+                    verify = await _json(r)
+                    if r.status != 200:
+                        raise RuntimeError(f"Marzban re-verification HTTP {r.status}: {verify}")
+                got_limit = verify.get("data_limit") if isinstance(verify, dict) else None
+                got_expire = verify.get("expire") if isinstance(verify, dict) else None
+                if int(got_limit or -1) != expected_limit or got_expire is None or abs(int(got_expire) - expected_expire) > 120:
+                    raise RuntimeError(f"Marzban rejected exact limits: limit={got_limit}/{expected_limit}, expire={got_expire}/{expected_expire}")
+            merged["verified_user"] = verify
+            merged["data_limit"] = got_limit
+            merged["expire"] = got_expire
 
             merged["subscription_url"] = connection
             merged["protocol_used"] = ",".join(selected_map.keys())
