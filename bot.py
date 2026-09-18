@@ -248,7 +248,7 @@ def build_connection_image(connection):
 
 
 def connection_caption(uid, title, connection, extra_lines=None):
-    lines = [html.escape(str(title))]
+    lines = [str(title)]
 
     if extra_lines:
         lines.extend(html.escape(str(x)) for x in extra_lines)
