@@ -598,6 +598,78 @@ def profile_stats(uid):
         }
 
 
+def mission_summary(uid):
+    """Return current mission stage and overall progress."""
+    stages = mission_stages()
+
+    if not stages:
+        return {
+            "stage": 0,
+            "stage_title_fa": "شروع",
+            "stage_title_en": "Start",
+            "progress": 0,
+            "total": 0,
+        }
+
+    current_stage = 1
+
+    for stage in stages:
+        stage_id = stage["id"]
+
+        missions = stage_missions(stage_id)
+
+        completed = 0
+        total = len(missions)
+
+        for mission in missions:
+            mission_type = mission["mission_type"]
+            target = int(mission["target"] or 0)
+
+            current = int(
+                mission_progress(uid, mission_type) or 0
+            )
+
+            if current >= target:
+                completed += 1
+
+        if total == 0:
+            current_stage = stage_id
+            continue
+
+        if completed < total:
+            current_stage = stage_id
+            break
+
+        current_stage = stage_id + 1
+
+    if current_stage > len(stages):
+        current_stage = len(stages)
+
+    current_missions = stage_missions(current_stage)
+
+    completed = 0
+    total = len(current_missions)
+
+    for mission in current_missions:
+        mission_type = mission["mission_type"]
+        target = int(mission["target"] or 0)
+
+        current = int(
+            mission_progress(uid, mission_type) or 0
+        )
+
+        if current >= target:
+            completed += 1
+
+    return {
+        "stage": current_stage,
+        "stage_title_fa": stages[current_stage - 1]["title_fa"],
+        "stage_title_en": stages[current_stage - 1]["title_en"],
+        "progress": completed,
+        "total": total,
+    }
+
+
 def referrals(uid):
     with conn() as c:
         return c.execute(

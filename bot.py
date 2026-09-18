@@ -327,10 +327,9 @@ def menu(uid):
             [KeyboardButton(tr(uid, "buy"), style="danger")],
             [KeyboardButton(tr(uid, "renew"), style="danger"), KeyboardButton(tr(uid, "trial"), style="success")],
             [KeyboardButton(tr(uid, "wallet"), style="primary")],
-            [KeyboardButton(tr(uid, "profile"), style="primary")],
             [KeyboardButton(tr(uid, "refs"), style="primary"), KeyboardButton(tr(uid, "orders"), style="success")],
             [KeyboardButton(tr(uid, "support"), style="primary"), KeyboardButton(tr(uid, "settings"), style="primary")],
-            [KeyboardButton(tr(uid, "guide"), style="primary")],
+            [KeyboardButton(tr(uid, "profile"), style="primary"), KeyboardButton(tr(uid, "guide"), style="primary")],
         ],
         resize_keyboard=True,
     )
@@ -2646,6 +2645,10 @@ async def account(update, context):
 
     coin_value = stats["alpha_coins"] * 100
 
+    mission = db.mission_summary(uid)
+    mission_stage = mission.get("stage", 1)
+    mission_progress = f"{mission.get('progress', 0)}/{mission.get('total', 0)}"
+
     if lang_code == "en":
         text = (
             "👤 <b>User Profile | Alpha Shop</b>\n"
@@ -2686,7 +2689,8 @@ async def account(update, context):
 
             "━━━━━━━━━━━━━━━━━━\n"
             "🎁 <b>Rewards</b>\n\n"
-
+            f"🏆 <b>Current Mission Stage:</b> {mission_stage}\n"
+            f"📈 <b>Mission Progress:</b> {mission_progress}\n"
             f"🪙 <b>Total Alpha Coins Earned:</b> "
             f"{stats['total_coins_earned']:,} ALC\n\n"
 
@@ -2738,7 +2742,8 @@ async def account(update, context):
 
             "━━━━━━━━━━━━━━━━━━\n"
             "🎁 <b>پاداش‌ها</b>\n\n"
-
+            f"🏆 <b>مرحله فعلی:</b> {mission_stage}\n"
+            f"📈 <b>پیشرفت مأموریت:</b> {mission_progress}\n"
             f"🪙 <b>مجموع آلفا کوین دریافتی:</b> "
             f"{stats['total_coins_earned']:,} ALC\n\n"
 
