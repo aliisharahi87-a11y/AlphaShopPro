@@ -399,11 +399,12 @@ async def gate(update, context):
 async def notify_referrer(update, context, referrer_id, new_user):
     """
     New referral:
-    - New user receives a one-time 5% coupon.
+    - Referrer receives a one-time 5% coupon.
     - Referrer receives Alpha Coin only after successful purchases.
     """
     try:
-        code = f"REF5_{new_user.id}"
+        # Create the 5% coupon for the REFERRER, not the new user.
+        code = f"REF5_{referrer_id}"
 
         if not db.get_coupon(code):
             db.create_coupon(
@@ -414,38 +415,14 @@ async def notify_referrer(update, context, referrer_id, new_user):
 
         name = new_user.first_name or "دوست جدید"
 
-        try:
-            if lang(new_user.id) == "fa":
-                new_user_message = (
-                    "🎉 <b>خوش آمدید به آلفا شاپ!</b> 🌹\n\n"
-                    "🎁 به دلیل ورود از لینک دعوت، "
-                    "<b>۵٪ تخفیف</b> برای شما فعال شد.\n\n"
-                    f"🎟 کد تخفیف:\n<code>{code}</code>\n\n"
-                    "💡 این کد یک‌بار قابل استفاده است."
-                )
-            else:
-                new_user_message = (
-                    "🎉 <b>Welcome to Alpha Shop!</b> 🌹\n\n"
-                    "🎁 You received a "
-                    "<b>5% discount</b> because you joined "
-                    "through a referral link.\n\n"
-                    f"🎟 Coupon:\n<code>{code}</code>\n\n"
-                    "💡 This coupon can be used once."
-                )
-
-            await context.bot.send_message(
-                chat_id=new_user.id,
-                text=new_user_message,
-                parse_mode="HTML",
-            )
-        except Exception as e:
-            print(f"Referral new-user message error: {e}")
-
         if lang(referrer_id) == "fa":
             message = (
                 "🎉 <b>یک زیرمجموعه جدید به شما اضافه شد!</b> 🌹\n\n"
-                f"👤 کاربر: <b>{name}</b>\n"
+                f"👤 کاربر: <b>{html.escape(name)}</b>\n"
                 f"🆔 شناسه: <code>{new_user.id}</code>\n\n"
+                "🎁 <b>کد تخفیف ۵٪ شما:</b>\n"
+                f"<code>{code}</code>\n\n"
+                "💡 این کد یک‌بار قابل استفاده است.\n\n"
                 "🪙 از خریدهای موفق این کاربر، "
                 "<b>۲.۵٪ مبلغ پرداختی</b> به صورت Alpha Coin "
                 "برای شما ثبت می‌شود."
@@ -453,12 +430,16 @@ async def notify_referrer(update, context, referrer_id, new_user):
         else:
             message = (
                 "🎉 <b>You got a new referral!</b> 🌹\n\n"
-                f"👤 User: <b>{name}</b>\n"
+                f"👤 User: <b>{html.escape(name)}</b>\n"
                 f"🆔 ID: <code>{new_user.id}</code>\n\n"
-                "🪙 You receive <b>2.5%</b> of their "
+                "🎁 <b>Your 5% discount code:</b>\n"
+                f"<code>{code}</code>\n\n"
+                "💡 This coupon can be used once.\n\n"
+                "🪙 You receive <b>2.5%</b> of this user's "
                 "successful purchases as Alpha Coin."
             )
 
+        # Send the coupon to the REFERRER.
         await context.bot.send_message(
             chat_id=referrer_id,
             text=message,
