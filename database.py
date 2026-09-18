@@ -525,6 +525,79 @@ def award_purchase_alpha_coins(order_id, buyer_id, paid_amount):
     return result
 
 
+def profile_stats(uid):
+    """Return real account statistics for the user profile."""
+    uid = int(uid)
+
+    with conn() as c:
+        user = c.execute(
+            "SELECT * FROM users WHERE id=?",
+            (uid,),
+        ).fetchone()
+
+        if not user:
+            return {}
+
+        purchases = c.execute(
+            """
+            SELECT COUNT(*)
+            FROM orders
+            WHERE user_id=? AND status='completed'
+            """,
+            (uid,),
+        ).fetchone()[0]
+
+        renewals = c.execute(
+            """
+            SELECT COUNT(*)
+            FROM transactions
+            WHERE user_id=? AND kind='renewal_success'
+            """,
+            (uid,),
+        ).fetchone()[0]
+
+        active_services = c.execute(
+            """
+            SELECT COUNT(*)
+            FROM orders
+            WHERE user_id=? AND status='completed'
+            """,
+            (uid,),
+        ).fetchone()[0]
+
+        referrals_count = c.execute(
+            """
+            SELECT COUNT(*)
+            FROM users
+            WHERE referrer=?
+            """,
+            (uid,),
+        ).fetchone()[0]
+
+        total_coins_earned = c.execute(
+            """
+            SELECT COALESCE(SUM(amount), 0)
+            FROM alpha_coin_ledger
+            WHERE user_id=? AND amount>0
+            """,
+            (uid,),
+        ).fetchone()[0]
+
+        return {
+            "balance": int(user["balance"] or 0),
+            "alpha_coins": int(user["alpha_coins"] or 0),
+            "username": user["username"] or "",
+            "first_name": user["first_name"] or "",
+            "lang": user["lang"] or "fa",
+            "created_at": int(user["created_at"] or 0),
+            "purchases": int(purchases or 0),
+            "renewals": int(renewals or 0),
+            "active_services": int(active_services or 0),
+            "referrals": int(referrals_count or 0),
+            "total_coins_earned": int(total_coins_earned or 0),
+        }
+
+
 def referrals(uid):
     with conn() as c:
         return c.execute(

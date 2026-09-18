@@ -2617,10 +2617,143 @@ async def end_ai_mode(update, context):
 async def account(update, context):
     if not await gate(update, context):
         return
+
     uid = update.effective_user.id
-    u = db.get_user(uid)
+    stats = db.profile_stats(uid)
+
+    if not stats:
+        return
+
+    lang_code = stats.get("lang", "fa")
+
+    username = stats.get("username") or "-"
+    username_display = (
+        f"@{username}"
+        if username != "-"
+        else "-"
+    )
+
+    from datetime import datetime
+
+    created_at = stats.get("created_at") or 0
+
+    if created_at:
+        joined_date = datetime.fromtimestamp(
+            created_at
+        ).strftime("%Y/%m/%d")
+    else:
+        joined_date = "-"
+
+    coin_value = stats["alpha_coins"] * 100
+
+    if lang_code == "en":
+        text = (
+            "👤 <b>User Profile | Alpha Shop</b>\n"
+            "━━━━━━━━━━━━━━━━━━\n\n"
+
+            "🪪 <b>Account Information</b>\n\n"
+
+            f"🆔 <b>User ID:</b> "
+            f"<code>{uid}</code>\n"
+            f"👤 <b>Username:</b> "
+            f"{username_display}\n"
+            f"🌐 <b>Language:</b> "
+            f"English\n"
+            f"📅 <b>Join Date:</b> "
+            f"{joined_date}\n\n"
+
+            "━━━━━━━━━━━━━━━━━━\n"
+            "💰 <b>Wallet & Credits</b>\n\n"
+
+            f"💳 <b>Wallet Balance:</b> "
+            f"{stats['balance']:,} Toman\n"
+            f"🪙 <b>Alpha Coins:</b> "
+            f"{stats['alpha_coins']:,} ALC\n"
+            f"💎 <b>Alpha Coin Value:</b> "
+            f"{coin_value:,} Toman\n\n"
+
+            "━━━━━━━━━━━━━━━━━━\n"
+            "📊 <b>Activity Statistics</b>\n\n"
+
+            f"🛒 <b>Successful Purchases:</b> "
+            f"{stats['purchases']} orders\n"
+            f"🔄 <b>Successful Renewals:</b> "
+            f"{stats['renewals']} times\n"
+            f"🟢 <b>Active Services:</b> "
+            f"{stats['active_services']} services\n"
+            f"👥 <b>Successful Referrals:</b> "
+            f"{stats['referrals']} users\n\n"
+
+            "━━━━━━━━━━━━━━━━━━\n"
+            "🎁 <b>Rewards</b>\n\n"
+
+            f"🪙 <b>Total Alpha Coins Earned:</b> "
+            f"{stats['total_coins_earned']:,} ALC\n\n"
+
+            "━━━━━━━━━━━━━━━━━━\n"
+            "🔐 <b>Account Status</b>\n\n"
+            "✅ Your account is active\n"
+            "🛡️ Your account information is protected\n\n"
+
+            "━━━━━━━━━━━━━━━━━━\n"
+            "💙 <i>Your trust, our credibility.</i>"
+        )
+    else:
+        text = (
+            "👤 <b>پروفایل کاربری | Alpha Shop</b>\n"
+            "━━━━━━━━━━━━━━━━━━\n\n"
+
+            "🪪 <b>اطلاعات حساب</b>\n\n"
+
+            f"🆔 <b>شناسه کاربری:</b> "
+            f"<code>{uid}</code>\n"
+            f"👤 <b>نام کاربری:</b> "
+            f"{username_display}\n"
+            f"🌐 <b>زبان حساب:</b> "
+            f"فارسی\n"
+            f"📅 <b>تاریخ عضویت:</b> "
+            f"{joined_date}\n\n"
+
+            "━━━━━━━━━━━━━━━━━━\n"
+            "💰 <b>کیف پول و اعتبار</b>\n\n"
+
+            f"💳 <b>موجودی کیف پول:</b> "
+            f"{stats['balance']:,} تومان\n"
+            f"🪙 <b>آلفا کوین:</b> "
+            f"{stats['alpha_coins']:,} ALC\n"
+            f"💎 <b>ارزش آلفا کوین:</b> "
+            f"{coin_value:,} تومان\n\n"
+
+            "━━━━━━━━━━━━━━━━━━\n"
+            "📊 <b>آمار فعالیت</b>\n\n"
+
+            f"🛒 <b>خریدهای موفق:</b> "
+            f"{stats['purchases']} سفارش\n"
+            f"🔄 <b>تمدیدهای موفق:</b> "
+            f"{stats['renewals']} بار\n"
+            f"🟢 <b>سرویس‌های فعال:</b> "
+            f"{stats['active_services']} سرویس\n"
+            f"👥 <b>زیرمجموعه‌های موفق:</b> "
+            f"{stats['referrals']} نفر\n\n"
+
+            "━━━━━━━━━━━━━━━━━━\n"
+            "🎁 <b>پاداش‌ها</b>\n\n"
+
+            f"🪙 <b>مجموع آلفا کوین دریافتی:</b> "
+            f"{stats['total_coins_earned']:,} ALC\n\n"
+
+            "━━━━━━━━━━━━━━━━━━\n"
+            "🔐 <b>وضعیت حساب</b>\n\n"
+            "✅ حساب شما فعال است\n"
+            "🛡️ اطلاعات حساب شما محفوظ است\n\n"
+
+            "━━━━━━━━━━━━━━━━━━\n"
+            "💙 <i>اعتماد شما ، اعتبار ماست .</i>"
+        )
+
     await update.message.reply_text(
-        tr(uid, "account", id=uid, balance=u["balance"])
+        text,
+        parse_mode="HTML",
     )
 
 
