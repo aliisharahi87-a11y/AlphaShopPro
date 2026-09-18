@@ -25,6 +25,7 @@ from config import *
 import database as db
 import ai_router
 from panel import create_customer, extend_customer, get_customer_info
+import secrets
 
 
 DEP_AMOUNT, DEP_RECEIPT, CUSTOM_GB, COUPON_INPUT = range(4)
@@ -1917,7 +1918,7 @@ async def _complete_pending_purchase(update, context):
             )
             return
 
-    username = f"alpha_{uid}_{oid}"
+    username = f"alpha_{uid}_{oid}_{secrets.token_hex(3)}"
     result = await create_customer(
         username,
         gb,
